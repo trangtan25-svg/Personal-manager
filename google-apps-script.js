@@ -1,7 +1,7 @@
 /**
  * GOOGLE APPS SCRIPT DATABASE ENGINE FOR PERSONAL MANAGER HUB
  * 
- * HƯỚNG DẪN CÀI ĐẶT:
+ * HƯỚNG DẪN CÀI ĐẶT CHI TIẾT:
  * 1. Mở Google Sheet của bạn (https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit)
  * 2. Trên thanh menu, chọn Tiện ích mở rộng (Extensions) -> Apps Script.
  * 3. Xóa toàn bộ mã mặc định trong tệp `Code.gs` và dán toàn bộ mã dưới đây vào.
@@ -30,6 +30,75 @@ const SCHEMAS = {
   "Tep_Tin": ["ID", "Name", "Type", "Size", "UploadedAt"]
 };
 
+// --- TỰ ĐỘNG KHỞI TẠO MENU TRÊN GOOGLE SHEETS ---
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('🤖 Personal Hub AI')
+    .addItem('✨ Khởi tạo cấu trúc các bảng', 'initializeDatabase')
+    .addToUi();
+}
+
+// Hàm khởi tạo toàn bộ cấu trúc cơ sở dữ liệu trên Google Sheets với định dạng chuyên nghiệp
+function initializeDatabase() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = ss.getSheets();
+  const ui = SpreadsheetApp.getUi();
+  
+  try {
+    // 1. Tạo và định dạng từng Sheet theo Schema định nghĩa sẵn
+    Object.keys(SCHEMAS).forEach(sheetName => {
+      let sheet = ss.getSheetByName(sheetName);
+      if (!sheet) {
+        sheet = ss.insertSheet(sheetName);
+      }
+      
+      // Clear nội dung và đặt tiêu đề cột
+      sheet.clear();
+      const headers = SCHEMAS[sheetName];
+      sheet.appendRow(headers);
+      
+      // Định dạng dòng tiêu đề (Header row) trông rất cao cấp
+      const headerRange = sheet.getRange(1, 1, 1, headers.length);
+      headerRange.setFontWeight("bold");
+      headerRange.setFontColor("#ffffff");
+      headerRange.setBackgroundColor("#1f2937"); // Dark Gray sang trọng
+      headerRange.setHorizontalAlignment("center");
+      
+      // Cố định dòng tiêu đề (Freeze top row)
+      sheet.setFrozenRows(1);
+      
+      // Tự động căn chỉnh độ rộng cột
+      for (let col = 1; col <= headers.length; col++) {
+        sheet.autoResizeColumn(col);
+        // Thiết lập độ rộng tối thiểu để dễ nhìn
+        if (sheet.getColumnWidth(col) < 120) {
+          sheet.setColumnWidth(col, 130);
+        }
+      }
+      
+      // Định dạng số cho cột số tiền nếu là các bảng tài chính
+      if (sheetName === "Thu_Nhap") {
+        sheet.getRange("B2:B").setNumberFormat('#,##0 "₫"'); // Cột Amount
+      } else if (sheetName === "Khoan_No") {
+        sheet.getRange("C2:C").setNumberFormat('#,##0 "₫"'); // Cột Amount
+        sheet.getRange("E2:E").setNumberFormat('0.0 "%"');   // Cột InterestRate
+      } else if (sheetName === "Ke_Hoach") {
+        sheet.getRange("C2:D").setNumberFormat('#,##0 "₫"'); // Cột Target & Current
+      }
+    });
+    
+    // Xóa trang tính "Trang tính1" (Sheet1) mặc định nếu nó trống
+    let defaultSheet = ss.getSheetByName("Trang tính1") || ss.getSheetByName("Sheet1");
+    if (defaultSheet && defaultSheet.getLastRow() === 0 && ss.getSheets().length > 1) {
+      ss.deleteSheet(defaultSheet);
+    }
+    
+    ui.alert('Thành công', 'Đã khởi tạo toàn bộ 6 bảng dữ liệu (Thu_Nhap, Khoan_No, Ke_Hoach, Cong_Viec, Ghi_Chu, Tep_Tin) kèm cấu trúc định dạng chuẩn tài chính thành công!', ui.ButtonSet.OK);
+  } catch (err) {
+    ui.alert('Lỗi khởi tạo', err.toString(), ui.ButtonSet.OK);
+  }
+}
+
 // Xử lý yêu cầu lấy dữ liệu (GET)
 function doGet(e) {
   const params = e.parameter;
@@ -47,7 +116,7 @@ function doGet(e) {
     Object.keys(SCHEMAS).forEach(sheetName => {
       let sheet = ss.getSheetByName(sheetName);
       if (!sheet) {
-        // Nếu chưa có sheet, tự tạo mới với header mặc định
+        // Tự tạo mới nếu chưa có
         sheet = ss.insertSheet(sheetName);
         sheet.appendRow(SCHEMAS[sheetName]);
       }
@@ -58,13 +127,11 @@ function doGet(e) {
       
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
-        // Bỏ qua dòng trống nếu có
-        if (!row[0]) continue; 
+        if (!row[0]) continue; // Bỏ qua dòng trống
         
         const item = {};
         headers.forEach((header, index) => {
           let value = row[index];
-          // Tránh lỗi JSON khi parse dữ liệu đặc biệt như ngày tháng
           if (value instanceof Date) {
             value = value.toISOString().split('T')[0];
           }
@@ -106,12 +173,20 @@ function doPost(e) {
         sheet = ss.insertSheet(sheetName);
       }
       
-      // Xóa toàn bộ nội dung cũ để ghi đè dữ liệu đồng bộ nguyên tử
+      // Xóa toàn bộ nội dung cũ
       sheet.clear();
       
-      // Thiết lập lại tiêu đề cột
+      // Thiết lập tiêu đề cột
       const headers = SCHEMAS[sheetName];
       sheet.appendRow(headers);
+      
+      // Định dạng dòng tiêu đề cho chuyên nghiệp
+      const headerRange = sheet.getRange(1, 1, 1, headers.length);
+      headerRange.setFontWeight("bold");
+      headerRange.setFontColor("#ffffff");
+      headerRange.setBackgroundColor("#1f2937");
+      headerRange.setHorizontalAlignment("center");
+      sheet.setFrozenRows(1);
       
       const items = payload[sheetName] || [];
       if (items.length > 0) {
@@ -121,7 +196,6 @@ function doPost(e) {
           const row = headers.map(header => {
             const key = header.toLowerCase();
             let val = item[key] !== undefined ? item[key] : "";
-            // Nếu giá trị là Object/Array, stringify lại trước khi ghi xuống trang tính
             if (typeof val === 'object' && val !== null) {
               val = JSON.stringify(val);
             }
@@ -130,8 +204,26 @@ function doPost(e) {
           rowsToWrite.push(row);
         });
         
-        // Ghi nhanh hàng loạt dữ liệu (Bulk Write) để tăng tốc độ xử lý
+        // Ghi nhanh hàng loạt
         sheet.getRange(2, 1, rowsToWrite.length, headers.length).setValues(rowsToWrite);
+        
+        // Căn chỉnh cột
+        for (let col = 1; col <= headers.length; col++) {
+          sheet.autoResizeColumn(col);
+          if (sheet.getColumnWidth(col) < 120) {
+            sheet.setColumnWidth(col, 130);
+          }
+        }
+        
+        // Định dạng cột số tiền/lãi suất
+        if (sheetName === "Thu_Nhap") {
+          sheet.getRange("B2:B" + (rowsToWrite.length + 1)).setNumberFormat('#,##0 "₫"');
+        } else if (sheetName === "Khoan_No") {
+          sheet.getRange("C2:C" + (rowsToWrite.length + 1)).setNumberFormat('#,##0 "₫"');
+          sheet.getRange("E2:E" + (rowsToWrite.length + 1)).setNumberFormat('0.0 "%"');
+        } else if (sheetName === "Ke_Hoach") {
+          sheet.getRange("C2:D" + (rowsToWrite.length + 1)).setNumberFormat('#,##0 "₫"');
+        }
       }
     });
     
