@@ -237,7 +237,14 @@ function doPost(e) {
         items.forEach(item => {
           const row = headers.map(header => {
             const key = header.toLowerCase();
-            let val = item[key] !== undefined ? item[key] : "";
+            // Hỗ trợ cả key chính xác theo Header (CamelCase) và key viết thường (lowercase)
+            let val = "";
+            if (item[header] !== undefined) {
+              val = item[header];
+            } else if (item[key] !== undefined) {
+              val = item[key];
+            }
+            
             if (typeof val === 'object' && val !== null) {
               val = JSON.stringify(val);
             }
