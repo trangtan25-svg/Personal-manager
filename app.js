@@ -8,6 +8,7 @@ let appState = {
     tasks: [],         // Công việc: { id, title, description, status, priority, dueDate }
     notes: [],         // Ghi chú: { id, title, content, createdAt }
     storageFiles: [],  // Tài liệu lưu trữ (Metadata): { id, name, type, size, uploadedAt }
+    isDirty: false,    // Cờ hiệu báo dữ liệu thay đổi chưa đồng bộ lên Sheets
     settings: {
         sheetUrl: "https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit?gid=0#gid=0",
         webAppUrl: "",
@@ -60,7 +61,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (envUrl && envUrl.startsWith("https://script.google.com/macros/s/")) {
                 appState.settings.webAppUrl = envUrl;
                 if (derivedKey) {
-                    saveStateToLocalStorage();
+                    saveStateToLocalStorage(false); // Không làm bẩn state khi chỉ cấu hình ENV
                 }
                 console.log("Đã tự động cấu hình URL Google Sheets từ Biến môi trường Vercel!");
             }
@@ -229,7 +230,7 @@ function handleRegisterMasterPassword() {
         localStorage.setItem("pmh_encrypted_key_test", encryptededTest);
         
         // Lưu dữ liệu trắng mặc định của state mới
-        saveStateToLocalStorage();
+        saveStateToLocalStorage(false); // Đăng ký tài khoản ban đầu không đánh dấu bẩn
         
         // Lưu danh sách mẹo lưu trữ mặc định
         localStorage.setItem("pmh_storage_tips", JSON.stringify(INITIAL_STORAGE_TIPS));
@@ -349,10 +350,13 @@ function shakeElement(el) {
 
 // ==================== B. MÃ HÓA CỤC BỘ DỮ LIỆU STATE (CRYPTO AES STATE) ====================
 
-// Lưu State đã mã hóa vào LocalStorage
-function saveStateToLocalStorage() {
+// Lưu State đã mã hóa vào LocalStorage (hỗ trợ cờ đánh dấu dữ liệu chưa đồng bộ)
+function saveStateToLocalStorage(setDirty = true) {
     if (!derivedKey) return;
     try {
+        if (setDirty) {
+            appState.isDirty = true;
+        }
         const stateString = JSON.stringify(appState);
         const encryptedState = CryptoJS.AES.encrypt(stateString, derivedKey).toString();
         localStorage.setItem("pmh_encrypted_state_data", encryptedState);
@@ -373,6 +377,11 @@ function loadStateFromLocalStorage() {
             
             if (decryptedText) {
                 appState = JSON.parse(decryptedText);
+                
+                // Đảm bảo tương thích ngược cờ isDirty
+                if (appState.isDirty === undefined) {
+                    appState.isDirty = false;
+                }
                 
                 // Đảm bảo không bị thiếu các thuộc tính cài đặt mặc định
                 if (!appState.settings) {
@@ -1297,7 +1306,7 @@ function triggerHeaderSyncGlow() {
     }
 }
 
-function syncAllDataToGoogleSheets() {
+function syncAllDataToGoogleSheets(alertSuccess = false) {
     const webAppUrl = appState.settings.webAppUrl;
     const syncToken = appState.settings.syncToken;
     const indicator = document.getElementById("sync-indicator");
@@ -1367,6 +1376,9 @@ function syncAllDataToGoogleSheets() {
     .then(resData => {
         isPushing = false;
         if (resData.success) {
+            appState.isDirty = false;
+            saveStateToLocalStorage(false); // Lưu trạng thái sạch sẽ
+            
             if (indicator) {
                 indicator.className = "sync-status-badge online";
                 indicator.querySelector(".status-text").textContent = "Đã đồng bộ";
@@ -1380,6 +1392,10 @@ function syncAllDataToGoogleSheets() {
             
             // Lóe sáng xanh neon cực đẹp báo hiệu đồng bộ thành công
             triggerHeaderSyncGlow();
+            
+            if (alertSuccess) {
+                alert("Đã đồng bộ và đẩy toàn bộ dữ liệu mới nhất lên Google Sheets thành công!");
+            }
         } else {
             throw new Error(resData.error || "Lỗi đồng bộ phía máy chủ Google.");
         }
@@ -1401,6 +1417,15 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
     const indicator = document.getElementById("sync-indicator");
     
     if (!webAppUrl) return;
+
+    // PHÒNG NGỪA TRANH CHẤP ĐỒNG BỘ (CƠ CHẾ RETRY ĐẨY DỮ LIỆU BẨN)
+    // Nếu dữ liệu cục bộ chưa được ghi xuống Sheets thành công, ta tiến hành
+    // đẩy dữ liệu lên thay vì kéo dữ liệu về để tránh ghi đè làm mất công việc của người dùng!
+    if (appState.isDirty) {
+        console.log("🔄 [Đồng bộ] Phát hiện dữ liệu thay đổi cục bộ chưa lưu lên Sheets. Tiến hành đẩy dữ liệu trước...");
+        syncAllDataToGoogleSheets(alertSuccess);
+        return;
+    }
 
     if (isPulling || isPushing) {
         console.log("⏳ [Tải về] Đồng bộ đang bận hoặc chạy ngầm, vui lòng đợi...");
@@ -1520,7 +1545,7 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
             appState.notes = pulledNotes;
             appState.storageFiles = pulledFiles;
             
-            saveStateToLocalStorage();
+            saveStateToLocalStorage(false); // Lưu trạng thái sạch sẽ sau khi kéo Sheets thành công
             renderAllViews();
             
             // Hiệu ứng phát sáng chỉ báo đồng bộ thành công
@@ -1585,7 +1610,7 @@ function handlePasswordChange() {
         const encryptededTest = CryptoJS.AES.encrypt(testPayload, derivedKey).toString();
         
         localStorage.setItem("pmh_encrypted_key_test", encryptededTest);
-        saveStateToLocalStorage();
+        saveStateToLocalStorage(false); // Đổi mật khẩu chỉ re-encrypt, không làm bẩn dữ liệu state
         
         document.getElementById("settings-change-password").value = "";
         alert("Thay đổi Mật khẩu chủ của Hub thành công!");
