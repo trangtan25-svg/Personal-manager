@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0f19" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    
+    <!-- Neon Accent Glow Gradient -->
+    <linearGradient id="glow-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />  <!-- Emerald -->
+      <stop offset="50%" stop-color="#3b82f6" /> <!-- Blue -->
+      <stop offset="100%" stop-color="#6366f1" /> <!-- Indigo -->
+    </linearGradient>
+
+    <!-- Glowing filter effect -->
+    <filter id="neon-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Outer sleek circular container -->
+  <rect width="512" height="512" rx="128" fill="url(#bg-grad)" />
+  
+  <!-- Subtle inner border ring -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#334155" stroke-width="4" stroke-dasharray="12 6" opacity="0.5" />
+
+  <!-- Glowing circle behind icon -->
+  <circle cx="256" cy="256" r="140" fill="none" stroke="url(#glow-grad)" stroke-width="12" filter="url(#neon-glow)" opacity="0.8" />
+  
+  <!-- Inner Shield Check Path -->
+  <g transform="translate(144, 136)" filter="url(#neon-glow)">
+    <!-- Shield Outline -->
+    <path d="M112 16 L208 48 C208 144 144 192 112 208 C80 192 16 144 16 48 Z" 
+          fill="none" stroke="url(#glow-grad)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+    
+    <!-- Checkmark Path -->
+    <path d="M72 108 L100 136 L152 76" 
+          fill="none" stroke="#ffffff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

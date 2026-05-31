@@ -2012,3 +2012,42 @@ h1, h2, h3, h4, h5, h6 {
         padding: 24px;
     }
 }
+
+/* ==================== HIỆU ỨNG ĐỒNG BỘ THỜI GIAN THỰC CAO CẤP (NEON SYNC GLOW) ==================== */
+.sync-success-glow {
+    animation: neon-sync-glow 1.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+@keyframes neon-sync-glow {
+    0% {
+        box-shadow: 0 0 0 0 hsla(145, 80%, 42%, 0.6);
+        background: hsla(145, 80%, 42%, 0.1);
+        border-color: var(--color-emerald);
+    }
+    50% {
+        box-shadow: 0 0 20px 8px hsla(145, 80%, 42%, 0.4);
+        background: hsla(145, 80%, 42%, 0.25);
+        border-color: var(--color-emerald);
+    }
+    100% {
+        box-shadow: 0 0 0 0 hsla(145, 80%, 42%, 0);
+        background: transparent;
+        border-color: transparent;
+    }
+}
+
+.sync-status-badge.sync-success-glow-badge {
+    animation: badge-sync-glow 1.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+@keyframes badge-sync-glow {
+    0%, 100% {
+        border-color: var(--border-glass);
+    }
+    50% {
+        border-color: var(--color-emerald);
+        background: hsla(145, 80%, 42%, 0.15);
+        box-shadow: 0 0 15px hsla(145, 80%, 42%, 0.25);
+    }
+}
+

@@ -5,19 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Personal Manager Hub - Quản lý Tài chính, Công việc & Kế hoạch Cá nhân</title>
     
-    <!-- Google Fonts: Plus Jakarta Sans & Outfit -->
+    <!-- Khai báo Manifest cho PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0b0f19">
+    
+    <!-- Tối ưu hóa trải nghiệm App di động iOS Safari PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Personal Hub">
+    <link rel="apple-touch-icon" href="/icon.svg">
+    
+    <!-- Tối ưu hóa preconnect kết nối trước tới các CDNs để tải nhanh hơn -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="preconnect" href="https://unpkg.com">
+    
+    <!-- Google Fonts: Plus Jakarta Sans & Outfit -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
     <!-- Tắt lỗi 404 của favicon.ico trên trình duyệt cục bộ -->
     <link rel="icon" href="data:,">
     
-    <!-- CDNs cho các thư viện bảo mật và trực quan -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js" referrerpolicy="no-referrer"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- CDNs cho các thư viện bảo mật và trực quan (Thêm 'defer' để không làm nghẽn quá trình dựng hình HTML) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js" referrerpolicy="no-referrer" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
+    <script src="https://unpkg.com/lucide@latest" defer></script>
     
     <!-- CSS Tùy chỉnh Cao cấp -->
     <link rel="stylesheet" href="style.css">

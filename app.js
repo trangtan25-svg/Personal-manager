@@ -19,6 +19,9 @@ let appState = {
 let derivedKey = "";
 let autoLockTimer = null;
 let autoSyncInterval = null;
+let isPushing = false;  // Cờ hiệu bảo vệ chống trùng lặp đẩy dữ liệu lên Sheets
+let isPulling = false;  // Cờ hiệu bảo vệ chống trùng lặp kéo dữ liệu từ Sheets
+let lastFocusSyncTime = 0; // Lưu thời gian đồng bộ refocus cuối cùng để chống double trigger
 const LOCK_TIMEOUT = 15 * 60 * 1000; // 15 phút không hoạt động tự động khóa
 
 // Cẩm nang mẹo lưu trữ tài liệu cá nhân mặc định
@@ -95,6 +98,32 @@ document.addEventListener("DOMContentLoaded", () => {
     ['mousemove', 'mousedown', 'keypress', 'touchstart', 'scroll'].forEach(evt => {
         document.addEventListener(evt, resetAutoLockTimer);
     });
+
+    // 3. Đăng ký Service Worker hỗ trợ PWA và Caching offline để tải trang trong 0ms
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js')
+                .then(reg => console.log('✅ Service Worker đã được đăng ký thành công với scope:', reg.scope))
+                .catch(err => console.error('❌ Đăng ký Service Worker thất bại:', err));
+        });
+    }
+
+    // 4. Bộ lắng nghe sự kiện Visibility & Focus để đồng bộ tự động thời gian thực khi quay lại ứng dụng
+    ['visibilitychange', 'focus'].forEach(evt => {
+        window.addEventListener(evt, () => {
+            if (evt === 'visibilitychange' && document.visibilityState !== 'visible') return;
+            
+            // Chống double trigger dồn dập (Chỉ chạy tối đa 1 lần mỗi 3 giây)
+            const now = Date.now();
+            if (now - lastFocusSyncTime < 3000) return;
+            
+            if (derivedKey && appState.settings && appState.settings.webAppUrl) {
+                lastFocusSyncTime = now;
+                console.log(`🔄 [Tự động Refocus] Phát hiện quay lại ứng dụng (${evt}), tiến hành kéo dữ liệu ngầm...`);
+                pullAllDataFromGoogleSheets(false);
+            }
+        });
+    });
 });
 
 // ==================== A. HỆ THỐNG ĐĂNG NHẬP & BẢO MẬT (LOCK SCREEN LOGIC) ====================
@@ -115,7 +144,10 @@ function initLockScreen() {
     if (!isPassphraseSet) {
         // Màn hình khởi tạo mật khẩu lần đầu
         formContainer.innerHTML = `
-            <p style="font-size: 13px; color: var(--color-primary); margin-bottom: 15px; line-height: 1.4;">Chào mừng! Hãy thiết lập Mật khẩu chủ để kích hoạt mã hóa dữ liệu cục bộ.</p>
+            <p style="font-size: 13px; color: var(--color-primary); margin-bottom: 10px; line-height: 1.4;">Chào mừng! Hãy thiết lập Mật khẩu chủ để kích hoạt mã hóa dữ liệu cục bộ.</p>
+            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 15px; line-height: 1.35; background: rgba(59, 130, 246, 0.05); padding: 10px; border-radius: 8px; border: 1px dashed rgba(59, 130, 246, 0.2); text-align: left;">
+                💡 <strong>Thiết bị mới?</strong> Mật khẩu chủ chỉ lưu trữ mã hóa cục bộ trên thiết bị này. Nếu đây là điện thoại hoặc máy tính mới, bạn có thể thiết lập mật khẩu giống hoặc khác máy cũ. Dữ liệu của bạn sẽ tự động được kéo xuống từ Sheets sau khi kết nối.
+            </p>
             <div class="form-group">
                 <input type="password" id="setup-pass" class="form-input" placeholder="Tạo mật khẩu mở khóa Hub..." required>
             </div>
@@ -285,10 +317,14 @@ function startBackgroundSync() {
     if (autoSyncInterval) clearInterval(autoSyncInterval);
     autoSyncInterval = setInterval(() => {
         if (derivedKey && appState.settings && appState.settings.webAppUrl) {
-            console.log("🔄 [Tự động ngầm] Đang kiểm tra cập nhật mới nhất từ Google Sheets...");
-            pullAllDataFromGoogleSheets(false); // Quét ngầm cập nhật dữ liệu mới từ máy tính sang điện thoại
+            if (!isPulling && !isPushing) {
+                console.log("🔄 [Tự động ngầm] Đang kiểm tra cập nhật mới nhất từ Google Sheets...");
+                pullAllDataFromGoogleSheets(false); // Quét ngầm cập nhật dữ liệu mới cực nhanh giữa máy tính và điện thoại
+            } else {
+                console.log("⏳ [Tự động ngầm] Bỏ qua vòng lặp do đang bận đồng bộ dữ liệu...");
+            }
         }
-    }, 45000); // 45 giây một lần
+    }, 15000); // Đồng bộ thời gian thực 15 giây một lần!
 }
 
 // Reset bộ đếm tự động khóa
@@ -1308,6 +1344,26 @@ function testGoogleSheetsConnection(alertSuccess = true) {
         });
 }
 
+// Hàm tạo hiệu ứng lóe sáng xanh neon khi đồng bộ thành công
+function triggerHeaderSyncGlow() {
+    const indicator = document.getElementById("sync-indicator");
+    const quickSyncBtn = document.getElementById("btn-quick-sync");
+    
+    if (indicator) {
+        indicator.classList.remove("sync-success-glow-badge");
+        void indicator.offsetWidth; // Trigger reflow để reset CSS animation
+        indicator.classList.add("sync-success-glow-badge");
+        setTimeout(() => indicator.classList.remove("sync-success-glow-badge"), 1500);
+    }
+    
+    if (quickSyncBtn) {
+        quickSyncBtn.classList.remove("sync-success-glow");
+        void quickSyncBtn.offsetWidth; // Trigger reflow để reset CSS animation
+        quickSyncBtn.classList.add("sync-success-glow");
+        setTimeout(() => quickSyncBtn.classList.remove("sync-success-glow"), 1500);
+    }
+}
+
 function syncAllDataToGoogleSheets() {
     const webAppUrl = appState.settings.webAppUrl;
     const syncToken = appState.settings.syncToken;
@@ -1317,7 +1373,13 @@ function syncAllDataToGoogleSheets() {
         console.warn("⚠️ Bỏ qua đồng bộ: webAppUrl đang trống hoặc chưa được cấu hình!");
         return;
     }
+
+    if (isPushing || isPulling) {
+        console.log("⏳ Hệ thống đang bận đồng bộ dữ liệu khác. Đợi lượt tiếp theo...");
+        return;
+    }
     
+    isPushing = true;
     console.log("⚡ Bắt đầu gửi đồng bộ lên Google Sheets...");
     console.log("- URL Web App nhận được:", webAppUrl);
     console.log("- Token sử dụng:", syncToken);
@@ -1370,6 +1432,7 @@ function syncAllDataToGoogleSheets() {
     })
     .then(res => res.json())
     .then(resData => {
+        isPushing = false;
         if (resData.success) {
             if (indicator) {
                 indicator.className = "sync-status-badge online";
@@ -1381,11 +1444,15 @@ function syncAllDataToGoogleSheets() {
             console.log("- ID bảng tính:", resData.spreadsheetId);
             console.log("- URL bảng tính:", resData.spreadsheetUrl);
             console.log("-----------------------------------------");
+            
+            // Lóe sáng xanh neon cực đẹp báo hiệu đồng bộ thành công
+            triggerHeaderSyncGlow();
         } else {
             throw new Error(resData.error || "Lỗi đồng bộ phía máy chủ Google.");
         }
     })
     .catch(err => {
+        isPushing = false;
         if (indicator) {
             indicator.className = "sync-status-badge offline";
             indicator.querySelector(".status-text").textContent = "Đồng bộ lỗi";
@@ -1401,7 +1468,13 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
     const indicator = document.getElementById("sync-indicator");
     
     if (!webAppUrl) return;
+
+    if (isPulling || isPushing) {
+        console.log("⏳ [Tải về] Đồng bộ đang bận hoặc chạy ngầm, vui lòng đợi...");
+        return;
+    }
     
+    isPulling = true;
     if (indicator) {
         indicator.className = "sync-status-badge syncing";
         indicator.querySelector(".status-text").textContent = "Đang tải...";
@@ -1412,16 +1485,21 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
     fetch(requestUrl, { method: "GET", mode: "cors" })
     .then(res => res.json())
     .then(resData => {
+        isPulling = false;
         if (resData.success && resData.data) {
             const sheetsData = resData.data;
             
+            // Map dữ liệu tạm thời để so sánh chênh lệch
+            let pulledTransactions = [];
             if (sheetsData.Thu_Nhap) {
-                appState.transactions = sheetsData.Thu_Nhap.map(t => {
+                pulledTransactions = sheetsData.Thu_Nhap.map(t => {
                     return { id: t.id, amount: parseFloat(t.amount) || 0, category: t.category, date: t.date, notes: t.notes, type: t.type };
                 });
             }
+            
+            let pulledDebts = [];
             if (sheetsData.Khoan_No) {
-                appState.debts = sheetsData.Khoan_No.map(d => {
+                pulledDebts = sheetsData.Khoan_No.map(d => {
                     let reps = [];
                     try { if (d.repayments) reps = JSON.parse(d.repayments); } catch(e){}
                     return { 
@@ -1431,8 +1509,10 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
                     };
                 });
             }
+            
+            let pulledGoals = [];
             if (sheetsData.Ke_Hoach) {
-                appState.goals = sheetsData.Ke_Hoach.map(g => {
+                pulledGoals = sheetsData.Ke_Hoach.map(g => {
                     let ms = [];
                     try { if (g.milestones) ms = JSON.parse(g.milestones); } catch(e){}
                     return {
@@ -1441,29 +1521,78 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
                     };
                 });
             }
+            
+            let pulledTasks = [];
             if (sheetsData.Cong_Viec) {
-                appState.tasks = sheetsData.Cong_Viec.map(t => {
+                pulledTasks = sheetsData.Cong_Viec.map(t => {
                     return { id: t.id, title: t.title, description: t.description, status: t.status, dueDate: t.duedate, priority: t.priority };
                 });
             }
+            
+            let pulledNotes = [];
             if (sheetsData.Ghi_Chu) {
-                appState.notes = sheetsData.Ghi_Chu.map(n => {
+                pulledNotes = sheetsData.Ghi_Chu.map(n => {
                     return { id: n.id, title: n.title, content: n.content, createdAt: n.createdat };
                 });
             }
+            
+            let pulledFiles = [];
             if (sheetsData.Tep_Tin) {
-                appState.storageFiles = sheetsData.Tep_Tin.map(f => {
+                pulledFiles = sheetsData.Tep_Tin.map(f => {
                     return { id: f.id, name: f.name, type: f.type, size: f.size, uploadedAt: f.uploadedat };
                 });
             }
             
-            saveStateToLocalStorage();
-            renderAllViews();
+            // --- THUẬT TOÁN SO SÁNH CHÊNH LỆCH DỮ LIỆU (UI DIFFING) ---
+            const currentCoreState = {
+                transactions: appState.transactions,
+                debts: appState.debts,
+                goals: appState.goals,
+                tasks: appState.tasks,
+                notes: appState.notes,
+                storageFiles: appState.storageFiles
+            };
+            const pulledCoreState = {
+                transactions: pulledTransactions,
+                debts: pulledDebts,
+                goals: pulledGoals,
+                tasks: pulledTasks,
+                notes: pulledNotes,
+                storageFiles: pulledFiles
+            };
+            
+            const currentStr = JSON.stringify(currentCoreState);
+            const pulledStr = JSON.stringify(pulledCoreState);
             
             if (indicator) {
                 indicator.className = "sync-status-badge online";
                 indicator.querySelector(".status-text").textContent = "Google Sheets";
             }
+            
+            if (currentStr === pulledStr) {
+                console.log("✅ [Đồng bộ] Dữ liệu trên Sheets và Cục bộ trùng khớp hoàn toàn. Bỏ qua re-render UI.");
+                if (alertSuccess) {
+                    alert("Dữ liệu của bạn đã được cập nhật mới nhất từ trước!");
+                }
+                return;
+            }
+            
+            console.log("🔄 [Đồng bộ] Phát hiện dữ liệu thay đổi từ thiết bị khác. Cập nhật và vẽ lại giao diện...");
+            
+            // Chỉ cập nhật state và vẽ lại khi thực sự có chênh lệch
+            appState.transactions = pulledTransactions;
+            appState.debts = pulledDebts;
+            appState.goals = pulledGoals;
+            appState.tasks = pulledTasks;
+            appState.notes = pulledNotes;
+            appState.storageFiles = pulledFiles;
+            
+            saveStateToLocalStorage();
+            renderAllViews();
+            
+            // Hiệu ứng phát sáng chỉ báo đồng bộ thành công
+            triggerHeaderSyncGlow();
+            
             if (alertSuccess) {
                 alert("Đã tải và cập nhật toàn bộ dữ liệu mới nhất từ Google Sheets thành công!");
             }
@@ -1472,6 +1601,7 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
         }
     })
     .catch(err => {
+        isPulling = false;
         if (indicator) {
             indicator.className = "sync-status-badge offline";
             indicator.querySelector(".status-text").textContent = "Lỗi tải về";
