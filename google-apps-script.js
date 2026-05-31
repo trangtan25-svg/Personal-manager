@@ -186,6 +186,53 @@ function doPost(e) {
       return createJsonResponse({ success: false, error: "Unauthorized access: Invalid security token." }, 401);
     }
     
+    // --- 1. XỬ LÝ TẢI FILE LÊN GOOGLE DRIVE ---
+    if (postData.action === "uploadFile") {
+      console.log("⚡ Nhận yêu cầu tải tệp tin lên Google Drive!");
+      const fileData = postData.fileData; // Chuỗi Base64
+      const fileName = postData.fileName;
+      const fileType = postData.fileType;
+      
+      // Giải mã Base64 sang Blob
+      const decoded = Utilities.base64Decode(fileData);
+      const blob = Utilities.newBlob(decoded, fileType, fileName);
+      
+      // Tìm hoặc tạo thư mục "PersonalManagerHub_Storage" trong Drive
+      const folderName = "PersonalManagerHub_Storage";
+      const folders = DriveApp.getFoldersByName(folderName);
+      let folder;
+      if (folders.hasNext()) {
+        folder = folders.next();
+      } else {
+        folder = DriveApp.createFolder(folderName);
+      }
+      
+      // Lưu tệp tin
+      const file = folder.createFile(blob);
+      
+      // Thiết lập quyền xem cho bất kỳ ai có link (để xem/tải trực tiếp từ Hub)
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      
+      return createJsonResponse({
+        success: true,
+        fileId: file.getId(),
+        fileName: file.getName(),
+        fileSize: file.getSize(),
+        fileUrl: file.getUrl(),
+        downloadUrl: "https://docs.google.com/uc?export=download&id=" + file.getId()
+      });
+    }
+
+    // --- 2. XỬ LÝ XÓA FILE TRÊN GOOGLE DRIVE ---
+    if (postData.action === "deleteFile") {
+      console.log("⚡ Nhận yêu cầu xóa tệp tin trong Google Drive!");
+      const fileId = postData.fileId;
+      const file = DriveApp.getFileById(fileId);
+      file.setTrashed(true); // Di chuyển vào thùng rác của Drive
+      
+      return createJsonResponse({ success: true });
+    }
+    
     const payload = postData.data;
     if (!payload) {
       console.warn("LỖI: Thuộc tính data rỗng!");
