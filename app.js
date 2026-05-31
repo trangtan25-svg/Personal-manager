@@ -1337,18 +1337,21 @@ function syncAllDataToGoogleSheets() {
     
     fetch(webAppUrl, {
         method: "POST",
-        mode: "no-cors", // Bỏ qua 100% rào cản CORS trên Vercel
+        mode: "cors", // Dùng 'cors' kết hợp Content-Type: 'text/plain' để tránh preflight OPTIONS mà vẫn đọc được phản hồi từ Google!
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payload)
     })
-    .then(() => {
-        // Mode 'no-cors' trả về opaque response (không cho đọc phản hồi vì lý do bảo mật trình duyệt)
-        // Nhưng dữ liệu vẫn được truyền đi và Google Apps Script vẫn xử lý ghi vào Sheet cực kỳ chuẩn xác!
-        if (indicator) {
-            indicator.className = "sync-status-badge online";
-            indicator.querySelector(".status-text").textContent = "Đã đồng bộ";
+    .then(res => res.json())
+    .then(resData => {
+        if (resData.success) {
+            if (indicator) {
+                indicator.className = "sync-status-badge online";
+                indicator.querySelector(".status-text").textContent = "Đã đồng bộ";
+            }
+            console.log("Đồng bộ Google Sheets thành công!");
+        } else {
+            throw new Error(resData.error || "Lỗi đồng bộ phía máy chủ Google.");
         }
-        console.log("Đã gửi dữ liệu đồng bộ lên Google Sheets (Chế độ Opaque No-CORS).");
     })
     .catch(err => {
         if (indicator) {
@@ -1356,6 +1359,7 @@ function syncAllDataToGoogleSheets() {
             indicator.querySelector(".status-text").textContent = "Đồng bộ lỗi";
         }
         console.error("Đồng bộ Google Sheets thất bại:", err);
+        alert("Lỗi đồng bộ đám mây: " + err.message);
     });
 }
 
