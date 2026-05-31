@@ -271,7 +271,13 @@ function doPost(e) {
     });
     
     console.log("=== ĐỒNG BỘ DỮ LIỆU HOÀN THÀNH THÀNH CÔNG ===");
-    return createJsonResponse({ success: true, message: "Sync successfully!" });
+    return createJsonResponse({ 
+      success: true, 
+      message: "Sync successfully!",
+      spreadsheetName: ss.getName(),
+      spreadsheetId: ss.getId(),
+      spreadsheetUrl: ss.getUrl()
+    });
   } catch (err) {
     console.error("LỖI NGOẠI LỆ TRONG doPost: " + err.toString());
     return createJsonResponse({ success: false, error: err.toString() }, 500);

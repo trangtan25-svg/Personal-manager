@@ -1359,6 +1359,11 @@ function syncAllDataToGoogleSheets() {
                 indicator.querySelector(".status-text").textContent = "Đã đồng bộ";
             }
             console.log("Đồng bộ Google Sheets thành công!");
+            console.log("👉 CHI TIẾT CƠ SỞ DỮ LIỆU ĐÃ GHI:");
+            console.log("- Tên trang tính:", resData.spreadsheetName);
+            console.log("- ID bảng tính:", resData.spreadsheetId);
+            console.log("- URL bảng tính:", resData.spreadsheetUrl);
+            console.log("-----------------------------------------");
         } else {
             throw new Error(resData.error || "Lỗi đồng bộ phía máy chủ Google.");
         }
