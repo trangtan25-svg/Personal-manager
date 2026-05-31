@@ -329,6 +329,20 @@ function loadStateFromLocalStorage() {
                         syncToken: "PersonalManagerHub2026"
                     };
                 }
+                
+                // Tự động kiểm tra và áp dụng URL Google Sheets từ Biến môi trường Vercel (nếu có)
+                // để tránh bị đè bởi giá trị rỗng từ localStorage cũ của người dùng
+                try {
+                    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL) {
+                        const envUrl = import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL;
+                        if (envUrl && envUrl.startsWith("https://script.google.com/macros/s/")) {
+                            appState.settings.webAppUrl = envUrl;
+                            console.log("Đã tự động áp dụng URL Google Sheets từ Biến môi trường Vercel sau giải mã!");
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Không đọc được biến môi trường trong loadStateFromLocalStorage: ", e.message);
+                }
             }
         } catch (e) {
             console.error("Giải mã State cục bộ thất bại: ", e);
