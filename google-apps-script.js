@@ -171,18 +171,14 @@ function doGet(e) {
 // Xử lý yêu cầu cập nhật/đồng bộ dữ liệu (POST)
 function doPost(e) {
   try {
-    console.log("=== BẮT ĐẦU ĐỒNG BỘ DỮ LIỆU (doPost) ===");
+    console.log("=== BẮT ĐẦU ĐỒNG BỘ DỮ LIỆU TỐI ƯU (doPost) ===");
     
     if (!e || !e.postData || !e.postData.contents) {
       console.error("LỖI: Request Body trống rỗng!");
       return createJsonResponse({ success: false, error: "Empty request body" }, 400);
     }
     
-    console.log("Dữ liệu thô nhận được (Raw payload): " + e.postData.contents.substring(0, 150) + "...");
     const postData = JSON.parse(e.postData.contents);
-    
-    console.log("Mã Token bảo mật nhận được: '" + postData.token + "'");
-    console.log("Mã Token bảo mật cấu hình: '" + SECURITY_TOKEN + "'");
     
     // Xác thực token bảo mật
     if (postData.token !== SECURITY_TOKEN) {
@@ -190,7 +186,6 @@ function doPost(e) {
       return createJsonResponse({ success: false, error: "Unauthorized access: Invalid security token." }, 401);
     }
     
-    console.log("Xác thực Token thành công!");
     const payload = postData.data;
     if (!payload) {
       console.warn("LỖI: Thuộc tính data rỗng!");
@@ -199,37 +194,54 @@ function doPost(e) {
     
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     if (!ss) {
-      console.error("LỖI: Không tìm thấy Spreadsheet hoạt động! Hãy đảm bảo script được gắn liền (Container-Bound) với Google Sheet.");
+      console.error("LỖI: Không tìm thấy Spreadsheet hoạt động!");
       return createJsonResponse({ success: false, error: "Spreadsheet not found." }, 500);
     }
-    console.log("Đã tìm thấy Google Sheet có tên: " + ss.getName());
     
-    // Lặp qua từng bảng dữ liệu được gửi lên
+    // Lặp qua từng bảng dữ liệu được gửi lên để cập nhật
     Object.keys(SCHEMAS).forEach(sheetName => {
       let sheet = ss.getSheetByName(sheetName);
+      let isNew = false;
       if (!sheet) {
-        console.log("Bảng " + sheetName + " chưa tồn tại. Tiến hành khởi tạo...");
+        console.log("Bảng " + sheetName + " chưa tồn tại. Tiến hành tạo mới...");
         sheet = ss.insertSheet(sheetName);
+        isNew = true;
       }
       
-      // Xóa toàn bộ nội dung cũ
-      sheet.clear();
-      console.log("Đã dọn dẹp dữ liệu bảng: " + sheetName);
-      
-      // Thiết lập tiêu đề cột
       const headers = SCHEMAS[sheetName];
-      sheet.appendRow(headers);
       
-      // Định dạng dòng tiêu đề cho chuyên nghiệp
-      const headerRange = sheet.getRange(1, 1, 1, headers.length);
-      headerRange.setFontWeight("bold");
-      headerRange.setFontColor("#ffffff");
-      headerRange.setBackgroundColor("#1f2937");
-      headerRange.setHorizontalAlignment("center");
-      sheet.setFrozenRows(1);
+      // Nếu là sheet mới hoặc chưa có tiêu đề, tiến hành ghi tiêu đề và định dạng dòng 1 lần đầu tiên
+      if (isNew || sheet.getLastRow() === 0) {
+        sheet.clear();
+        sheet.appendRow(headers);
+        
+        // Định dạng dòng tiêu đề cho chuyên nghiệp
+        const headerRange = sheet.getRange(1, 1, 1, headers.length);
+        headerRange.setFontWeight("bold");
+        headerRange.setFontColor("#ffffff");
+        headerRange.setBackgroundColor("#1f2937");
+        headerRange.setHorizontalAlignment("center");
+        sheet.setFrozenRows(1);
+        
+        // Căn chỉnh độ rộng cột lần đầu (chạy chậm nên chỉ chạy khi tạo mới)
+        for (let col = 1; col <= headers.length; col++) {
+          sheet.autoResizeColumn(col);
+          if (sheet.getColumnWidth(col) < 120) {
+            sheet.setColumnWidth(col, 130);
+          }
+        }
+        console.log("Đã khởi tạo và định dạng xong tiêu đề bảng mới: " + sheetName);
+      } else {
+        // Nếu bảng đã có sẵn cấu trúc, chỉ xóa phần dữ liệu cũ từ dòng 2 trở đi để giữ nguyên tiêu đề và độ rộng cột
+        const lastRow = sheet.getLastRow();
+        if (lastRow > 1) {
+          sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+        }
+        console.log("Đã dọn dẹp nhanh dữ liệu cũ bảng: " + sheetName);
+      }
       
       const items = payload[sheetName] || [];
-      console.log("Bảng " + sheetName + " nhận được: " + items.length + " dòng dữ liệu.");
+      console.log("Bảng " + sheetName + " chuẩn bị ghi: " + items.length + " dòng.");
       
       if (items.length > 0) {
         const rowsToWrite = [];
@@ -253,19 +265,11 @@ function doPost(e) {
           rowsToWrite.push(row);
         });
         
-        // Ghi nhanh hàng loạt
+        // Ghi dữ liệu hàng loạt bắt đầu từ dòng thứ 2
         sheet.getRange(2, 1, rowsToWrite.length, headers.length).setValues(rowsToWrite);
         console.log("Đã ghi xong " + rowsToWrite.length + " dòng vào bảng " + sheetName);
         
-        // Căn chỉnh cột
-        for (let col = 1; col <= headers.length; col++) {
-          sheet.autoResizeColumn(col);
-          if (sheet.getColumnWidth(col) < 120) {
-            sheet.setColumnWidth(col, 130);
-          }
-        }
-        
-        // Định dạng cột số tiền/lãi suất
+        // Định dạng cột số tiền/lãi suất nhanh
         if (sheetName === "Thu_Nhap") {
           sheet.getRange("B2:B" + (rowsToWrite.length + 1)).setNumberFormat('#,##0 "₫"');
         } else if (sheetName === "Khoan_No") {
