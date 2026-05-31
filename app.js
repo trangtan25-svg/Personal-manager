@@ -1296,7 +1296,17 @@ function syncAllDataToGoogleSheets() {
     const syncToken = appState.settings.syncToken;
     const indicator = document.getElementById("sync-indicator");
     
-    if (!webAppUrl) return;
+    if (!webAppUrl) {
+        console.warn("⚠️ Bỏ qua đồng bộ: webAppUrl đang trống hoặc chưa được cấu hình!");
+        return;
+    }
+    
+    console.log("⚡ Bắt đầu gửi đồng bộ lên Google Sheets...");
+    console.log("- URL Web App nhận được:", webAppUrl);
+    console.log("- Token sử dụng:", syncToken);
+    console.log("- Số lượng giao dịch gửi đi:", appState.transactions.length);
+    console.log("- Số lượng khoản nợ gửi đi:", appState.debts.length);
+    console.log("- Số lượng ghi chú gửi đi:", appState.notes.length);
     
     if (indicator) {
         indicator.className = "sync-status-badge syncing";
