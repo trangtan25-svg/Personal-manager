@@ -1,4 +1,4 @@
-const CACHE_NAME = 'personal-hub-cache-v4';
+const CACHE_NAME = 'personal-hub-cache-v5';
 
 // Các tài nguyên cốt lõi cần tải trước (Pre-cache) để hoạt động offline-first
 const PRECACHE_ASSETS = [

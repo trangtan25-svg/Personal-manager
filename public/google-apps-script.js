@@ -316,15 +316,7 @@ function doPost(e) {
         sheet.getRange(2, 1, rowsToWrite.length, headers.length).setValues(rowsToWrite);
         console.log("Đã ghi xong " + rowsToWrite.length + " dòng vào bảng " + sheetName);
         
-        // Định dạng cột số tiền/lãi suất nhanh
-        if (sheetName === "Thu_Nhap") {
-          sheet.getRange("B2:B" + (rowsToWrite.length + 1)).setNumberFormat('#,##0 "₫"');
-        } else if (sheetName === "Khoan_No") {
-          sheet.getRange("C2:C" + (rowsToWrite.length + 1)).setNumberFormat('#,##0 "₫"');
-          sheet.getRange("E2:E" + (rowsToWrite.length + 1)).setNumberFormat('0.0 "%"');
-        } else if (sheetName === "Ke_Hoach") {
-          sheet.getRange("C2:D" + (rowsToWrite.length + 1)).setNumberFormat('#,##0 "₫"');
-        }
+        // Cột số tiền đã được định dạng vô hạn từ lúc khởi tạo database, bỏ qua gọi setNumberFormat để tăng tốc độ ghi.
       }
     });
     
