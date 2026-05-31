@@ -1300,7 +1300,7 @@ function syncAllDataToGoogleSheets() {
     fetch(webAppUrl, {
         method: "POST",
         mode: "cors",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payload)
     })
     .then(res => res.json())
