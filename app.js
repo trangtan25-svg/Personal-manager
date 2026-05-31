@@ -18,6 +18,7 @@ let appState = {
 // Khóa giải mã dẫn xuất từ Master Password của người dùng
 let derivedKey = "";
 let autoLockTimer = null;
+let autoSyncInterval = null;
 const LOCK_TIMEOUT = 15 * 60 * 1000; // 15 phút không hoạt động tự động khóa
 
 // Cẩm nang mẹo lưu trữ tài liệu cá nhân mặc định
@@ -253,6 +254,10 @@ function lockApp() {
         transactions: [], debts: [], goals: [], tasks: [], notes: [], storageFiles: [],
         settings: { sheetUrl: "https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit?gid=0#gid=0", webAppUrl: "", syncToken: "PersonalManagerHub2026" }
     };
+    if (autoSyncInterval) {
+        clearInterval(autoSyncInterval);
+        autoSyncInterval = null;
+    }
     document.getElementById("app-layout").classList.add("hidden");
     document.getElementById("lock-screen").classList.remove("hidden");
     initLockScreen();
@@ -268,10 +273,22 @@ function unlockAppInterface() {
     initAppComponents();
     renderAllViews();
     
-    // Tự động test kết nối Google Sheets nếu đã được cài đặt từ trước
+    // Tự động đồng bộ kéo dữ liệu mới nhất ngầm khi đăng nhập (không cần người dùng nhấn nút)
     if (appState.settings && appState.settings.webAppUrl) {
-        testGoogleSheetsConnection(false);
+        pullAllDataFromGoogleSheets(false); // Silent pull!
+        startBackgroundSync();
     }
+}
+
+// Hàm khởi chạy vòng lặp tự động đồng bộ ngầm định kỳ
+function startBackgroundSync() {
+    if (autoSyncInterval) clearInterval(autoSyncInterval);
+    autoSyncInterval = setInterval(() => {
+        if (derivedKey && appState.settings && appState.settings.webAppUrl) {
+            console.log("🔄 [Tự động ngầm] Đang kiểm tra cập nhật mới nhất từ Google Sheets...");
+            pullAllDataFromGoogleSheets(false); // Quét ngầm cập nhật dữ liệu mới từ máy tính sang điện thoại
+        }
+    }, 45000); // 45 giây một lần
 }
 
 // Reset bộ đếm tự động khóa
@@ -1378,7 +1395,7 @@ function syncAllDataToGoogleSheets() {
     });
 }
 
-function pullAllDataFromGoogleSheets() {
+function pullAllDataFromGoogleSheets(alertSuccess = true) {
     const webAppUrl = appState.settings.webAppUrl;
     const syncToken = appState.settings.syncToken;
     const indicator = document.getElementById("sync-indicator");
@@ -1447,7 +1464,9 @@ function pullAllDataFromGoogleSheets() {
                 indicator.className = "sync-status-badge online";
                 indicator.querySelector(".status-text").textContent = "Google Sheets";
             }
-            alert("Đã tải và cập nhật toàn bộ dữ liệu mới nhất từ Google Sheets thành công!");
+            if (alertSuccess) {
+                alert("Đã tải và cập nhật toàn bộ dữ liệu mới nhất từ Google Sheets thành công!");
+            }
         } else {
             throw new Error(resData.error || "Không lấy được dữ liệu.");
         }
@@ -1457,7 +1476,11 @@ function pullAllDataFromGoogleSheets() {
             indicator.className = "sync-status-badge offline";
             indicator.querySelector(".status-text").textContent = "Lỗi tải về";
         }
-        alert("Lỗi đồng bộ tải dữ liệu từ Sheets: " + err.message);
+        if (alertSuccess) {
+            alert("Lỗi đồng bộ tải dữ liệu từ Sheets: " + err.message);
+        } else {
+            console.warn("Lỗi đồng bộ ngầm tải dữ liệu từ Sheets:", err.message);
+        }
     });
 }
 
