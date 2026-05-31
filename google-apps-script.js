@@ -101,22 +101,38 @@ function initializeDatabase() {
 
 // Xử lý yêu cầu lấy dữ liệu (GET)
 function doGet(e) {
-  const params = e.parameter;
-  
-  // Xác thực token bảo mật
-  if (params.token !== SECURITY_TOKEN) {
-    return createJsonResponse({ success: false, error: "Unauthorized access: Invalid security token." }, 401);
-  }
-  
   try {
+    console.log("=== BẮT ĐẦU TẢI DỮ LIỆU (doGet) ===");
+    if (!e || !e.parameter) {
+      console.error("LỖI: Request Parameters bị trống!");
+      return createJsonResponse({ success: false, error: "Request parameters are missing." }, 400);
+    }
+    
+    const params = e.parameter;
+    console.log("Mã Token bảo mật nhận được: '" + params.token + "'");
+    console.log("Mã Token bảo mật cấu hình: '" + SECURITY_TOKEN + "'");
+    
+    // Xác thực token bảo mật
+    if (params.token !== SECURITY_TOKEN) {
+      console.warn("LỖI: Token bảo mật không trùng khớp!");
+      return createJsonResponse({ success: false, error: "Unauthorized access: Invalid security token." }, 401);
+    }
+    
+    console.log("Xác thực Token thành công!");
     const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      console.error("LỖI: Không tìm thấy Spreadsheet hoạt động! Hãy đảm bảo script được gắn liền (Container-Bound) với Google Sheet.");
+      return createJsonResponse({ success: false, error: "Spreadsheet not found." }, 500);
+    }
+    console.log("Đã tìm thấy Google Sheet có tên: " + ss.getName());
+    
     const data = {};
     
     // Đọc tất cả các bảng dữ liệu
     Object.keys(SCHEMAS).forEach(sheetName => {
       let sheet = ss.getSheetByName(sheetName);
       if (!sheet) {
-        // Tự tạo mới nếu chưa có
+        console.log("Bảng " + sheetName + " chưa tồn tại. Tự khởi động tạo mới...");
         sheet = ss.insertSheet(sheetName);
         sheet.appendRow(SCHEMAS[sheetName]);
       }
@@ -140,11 +156,14 @@ function doGet(e) {
         items.push(item);
       }
       
+      console.log("Bảng " + sheetName + " đã đọc xong " + items.length + " dòng dữ liệu.");
       data[sheetName] = items;
     });
     
+    console.log("=== TẢI DỮ LIỆU HOÀN THÀNH THÀNH CÔNG ===");
     return createJsonResponse({ success: true, data: data });
   } catch (err) {
+    console.error("LỖI NGOẠI LỆ TRONG doGet: " + err.toString());
     return createJsonResponse({ success: false, error: err.toString() }, 500);
   }
 }
@@ -152,29 +171,50 @@ function doGet(e) {
 // Xử lý yêu cầu cập nhật/đồng bộ dữ liệu (POST)
 function doPost(e) {
   try {
+    console.log("=== BẮT ĐẦU ĐỒNG BỘ DỮ LIỆU (doPost) ===");
+    
+    if (!e || !e.postData || !e.postData.contents) {
+      console.error("LỖI: Request Body trống rỗng!");
+      return createJsonResponse({ success: false, error: "Empty request body" }, 400);
+    }
+    
+    console.log("Dữ liệu thô nhận được (Raw payload): " + e.postData.contents.substring(0, 150) + "...");
     const postData = JSON.parse(e.postData.contents);
+    
+    console.log("Mã Token bảo mật nhận được: '" + postData.token + "'");
+    console.log("Mã Token bảo mật cấu hình: '" + SECURITY_TOKEN + "'");
     
     // Xác thực token bảo mật
     if (postData.token !== SECURITY_TOKEN) {
+      console.warn("LỖI: Token bảo mật không trùng khớp!");
       return createJsonResponse({ success: false, error: "Unauthorized access: Invalid security token." }, 401);
     }
     
+    console.log("Xác thực Token thành công!");
     const payload = postData.data;
     if (!payload) {
+      console.warn("LỖI: Thuộc tính data rỗng!");
       return createJsonResponse({ success: false, error: "Data payload is empty." }, 400);
     }
     
     const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      console.error("LỖI: Không tìm thấy Spreadsheet hoạt động! Hãy đảm bảo script được gắn liền (Container-Bound) với Google Sheet.");
+      return createJsonResponse({ success: false, error: "Spreadsheet not found." }, 500);
+    }
+    console.log("Đã tìm thấy Google Sheet có tên: " + ss.getName());
     
     // Lặp qua từng bảng dữ liệu được gửi lên
     Object.keys(SCHEMAS).forEach(sheetName => {
       let sheet = ss.getSheetByName(sheetName);
       if (!sheet) {
+        console.log("Bảng " + sheetName + " chưa tồn tại. Tiến hành khởi tạo...");
         sheet = ss.insertSheet(sheetName);
       }
       
       // Xóa toàn bộ nội dung cũ
       sheet.clear();
+      console.log("Đã dọn dẹp dữ liệu bảng: " + sheetName);
       
       // Thiết lập tiêu đề cột
       const headers = SCHEMAS[sheetName];
@@ -189,6 +229,8 @@ function doPost(e) {
       sheet.setFrozenRows(1);
       
       const items = payload[sheetName] || [];
+      console.log("Bảng " + sheetName + " nhận được: " + items.length + " dòng dữ liệu.");
+      
       if (items.length > 0) {
         const rowsToWrite = [];
         
@@ -206,6 +248,7 @@ function doPost(e) {
         
         // Ghi nhanh hàng loạt
         sheet.getRange(2, 1, rowsToWrite.length, headers.length).setValues(rowsToWrite);
+        console.log("Đã ghi xong " + rowsToWrite.length + " dòng vào bảng " + sheetName);
         
         // Căn chỉnh cột
         for (let col = 1; col <= headers.length; col++) {
@@ -227,8 +270,10 @@ function doPost(e) {
       }
     });
     
+    console.log("=== ĐỒNG BỘ DỮ LIỆU HOÀN THÀNH THÀNH CÔNG ===");
     return createJsonResponse({ success: true, message: "Sync successfully!" });
   } catch (err) {
+    console.error("LỖI NGOẠI LỆ TRONG doPost: " + err.toString());
     return createJsonResponse({ success: false, error: err.toString() }, 500);
   }
 }
