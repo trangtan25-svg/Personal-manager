@@ -981,14 +981,48 @@ function handleSaveGoal(e) {
         milestones = oldGoal.milestones;
     }
     
+    // Xử lý savings để tương thích ngược và khởi tạo đợt tích góp đầu tiên
+    let savings = [];
+    if (id && oldGoal) {
+        savings = oldGoal.savings || [];
+        // Nếu thay đổi số tiền hiện có trực tiếp trong form sửa, cập nhật đợt tích góp đầu tiên hoặc tạo mới
+        if (oldGoal.currentAmount !== currentAmount) {
+            if (savings.length > 0) {
+                // Điều chỉnh đợt đầu tiên hoặc bổ sung điều chỉnh để khớp với số tiền mới sửa đổi
+                const diff = currentAmount - oldGoal.currentAmount;
+                savings.push({
+                    id: "save-adjust-" + Date.now(),
+                    amount: diff,
+                    date: new Date().toISOString().split('T')[0]
+                });
+            } else if (currentAmount > 0) {
+                savings.push({
+                    id: "save-init-" + Date.now(),
+                    amount: currentAmount,
+                    date: new Date().toISOString().split('T')[0]
+                });
+            }
+        }
+    } else if (currentAmount > 0) {
+        savings.push({
+            id: "save-init-" + Date.now(),
+            amount: currentAmount,
+            date: new Date().toISOString().split('T')[0]
+        });
+    }
+    
+    // Tính lại currentAmount tổng hợp từ lịch sử đợt tích góp
+    const finalCurrentAmount = savings.length > 0 ? savings.reduce((sum, s) => sum + s.amount, 0) : currentAmount;
+    
     const newGoal = {
         id: id || "goal-" + Date.now(),
         title,
         timeframe,
         dueDate,
         targetAmount,
-        currentAmount,
-        milestones
+        currentAmount: finalCurrentAmount,
+        milestones,
+        savings
     };
     
     if (id) {
@@ -1010,6 +1044,140 @@ function handleDeleteGoal(id) {
         saveStateToLocalStorage();
         triggerAutoSync();
         renderAllViews();
+    }
+}
+
+// --- 3. TÍCH GÓP MỤC TIÊU TIẾT KIỆM LOGIC ---
+
+// Mở form nhập đợt tích góp
+function openSavingsModal(goalId) {
+    const goal = appState.goals.find(g => g.id === goalId);
+    if (!goal) return;
+    
+    document.getElementById("savings-goal-id").value = goal.id;
+    
+    const totalSaved = goal.savings ? goal.savings.reduce((sum, s) => sum + s.amount, 0) : goal.currentAmount;
+    const remaining = goal.targetAmount - totalSaved;
+    
+    document.getElementById("savings-goal-summary").innerHTML = `
+        <strong>Mục tiêu:</strong> ${goal.title}<br>
+        <strong>Mục tiêu tích lũy:</strong> ${goal.targetAmount.toLocaleString('vi-VN')} ₫<br>
+        <strong>Đã tích góp:</strong> ${totalSaved.toLocaleString('vi-VN')} ₫<br>
+        <strong>Còn lại:</strong> <span style="color: var(--color-primary); font-weight: bold;">${remaining > 0 ? remaining.toLocaleString('vi-VN') + ' ₫' : 'Đã đạt mục tiêu!'}</span>
+    `;
+    
+    document.getElementById("savings-amount").value = remaining > 0 ? remaining : 0;
+    document.getElementById("savings-date").value = new Date().toISOString().split('T')[0];
+    
+    // Hiển thị danh sách lịch sử tích góp chia nhỏ từng đợt
+    const historyList = document.getElementById("savings-history-list");
+    if (historyList) {
+        historyList.innerHTML = "";
+        const savingsList = goal.savings || [];
+        
+        if (savingsList.length === 0) {
+            historyList.innerHTML = `<p class="empty-text" style="font-size: 11px; margin: 0;">Chưa có đợt tích góp nào.</p>`;
+        } else {
+            savingsList.forEach((s, idx) => {
+                const item = document.createElement("div");
+                item.className = "file-item"; // Tái sử dụng style file-item cực đẹp
+                item.style.padding = "6px 10px";
+                item.style.display = "flex";
+                item.style.justifyContent = "space-between";
+                item.style.alignItems = "center";
+                item.style.background = "rgba(255,255,255,0.02)";
+                item.style.borderRadius = "6px";
+                item.style.border = "1px solid rgba(255,255,255,0.04)";
+                
+                item.innerHTML = `
+                    <div style="text-align: left;">
+                        <span style="font-size: 12px; font-weight: 600; color: var(--text-main);">Đợt ${idx + 1}: +${s.amount.toLocaleString('vi-VN')} ₫</span>
+                        <p style="margin: 0; font-size: 10px; color: var(--text-muted);">Ngày: ${s.date}</p>
+                    </div>
+                    <button type="button" class="btn-action-small btn-delete" onclick="deleteSaving('${goal.id}', '${s.id}')" title="Xóa đợt tích góp"><i data-lucide="trash-2" style="width: 12px; height: 12px;"></i></button>
+                `;
+                historyList.appendChild(item);
+            });
+        }
+    }
+    
+    openModal("modal-savings");
+}
+
+// Ghi nhận đợt tích góp mục tiêu
+function handleSaveSavings(e) {
+    e.preventDefault();
+    
+    const goalId = document.getElementById("savings-goal-id").value;
+    const amount = parseFloat(document.getElementById("savings-amount").value);
+    const date = document.getElementById("savings-date").value;
+    const autoTrans = document.getElementById("savings-auto-transaction").checked;
+    
+    const goalIdx = appState.goals.findIndex(g => g.id === goalId);
+    if (goalIdx === -1) return;
+    
+    const goal = appState.goals[goalIdx];
+    if (!goal.savings) {
+        goal.savings = [];
+    }
+    
+    const totalSaved = goal.savings.reduce((sum, s) => sum + s.amount, 0);
+    const remaining = goal.targetAmount - totalSaved;
+    
+    if (amount <= 0) {
+        alert("Số tiền tích góp đợt này phải lớn hơn 0 ₫.");
+        return;
+    }
+    
+    // 1. Thêm đợt tích góp vào nhật ký
+    const saveObj = {
+        id: "save-" + Date.now(),
+        amount,
+        date
+    };
+    goal.savings.push(saveObj);
+    
+    // Cập nhật currentAmount tổng hợp
+    goal.currentAmount = totalSaved + amount;
+    
+    // 2. Tự động ghi chép khoản chi này vào bảng Thu & Chi (dưới dạng chi tiêu tiết kiệm)
+    if (autoTrans) {
+        const transObj = {
+            id: "trans-" + Date.now(),
+            type: "expense",
+            date,
+            amount,
+            category: "Đầu tư / Tiết kiệm",
+            notes: `[Tự động tích góp] Đóng góp đợt cho mục tiêu "${goal.title}"`
+        };
+        appState.transactions.push(transObj);
+    }
+    
+    saveStateToLocalStorage();
+    triggerAutoSync();
+    closeModal("modal-savings");
+    renderAllViews();
+    alert("Cập nhật tích góp mục tiêu thành công!");
+}
+
+// Xóa đợt tích góp
+function deleteSaving(goalId, savingId) {
+    if (confirm("Bạn có chắc chắn muốn xóa đợt tích góp này?")) {
+        const goalIdx = appState.goals.findIndex(g => g.id === goalId);
+        if (goalIdx === -1) return;
+        
+        const goal = appState.goals[goalIdx];
+        goal.savings = goal.savings.filter(s => s.id !== savingId);
+        
+        // Cập nhật lại currentAmount tổng hợp
+        goal.currentAmount = goal.savings.reduce((sum, s) => sum + s.amount, 0);
+        
+        saveStateToLocalStorage();
+        triggerAutoSync();
+        renderAllViews();
+        
+        // Cập nhật lại giao diện modal hiện tại
+        openSavingsModal(goalId);
     }
 }
 
@@ -1429,7 +1597,8 @@ function syncAllDataToGoogleSheets(alertSuccess = false) {
                 return { 
                     "ID": g.id, "Title": g.title, "TargetAmount": g.targetAmount, "CurrentAmount": g.currentAmount, 
                     "DueDate": g.dueDate, "Timeframe": g.timeframe, 
-                    "Milestones": JSON.stringify(g.milestones)
+                    "Milestones": JSON.stringify(g.milestones),
+                    "Savings": JSON.stringify(g.savings || [])
                 };
             }),
             "Cong_Viec": appState.tasks.map(t => {
@@ -1551,9 +1720,11 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
                 pulledGoals = sheetsData.Ke_Hoach.map(g => {
                     let ms = [];
                     try { if (g.milestones) ms = JSON.parse(g.milestones); } catch(e){}
+                    let svs = [];
+                    try { if (g.savings) svs = JSON.parse(g.savings); } catch(e){}
                     return {
                         id: g.id, title: g.title, targetAmount: parseFloat(g.targetamount) || 0, currentAmount: parseFloat(g.currentamount) || 0,
-                        dueDate: g.duedate, timeframe: g.timeframe, milestones: ms
+                        dueDate: g.duedate, timeframe: g.timeframe, milestones: ms, savings: svs
                     };
                 });
             }
@@ -2053,12 +2224,13 @@ function renderGoalsView() {
     }
     
     list.forEach(g => {
+        const totalSaved = g.savings ? g.savings.reduce((sum, s) => sum + s.amount, 0) : g.currentAmount;
         let progressPct = 0;
         let progressText = "";
         
         if (g.targetAmount > 0) {
-            progressPct = Math.min(100, Math.round((g.currentAmount / g.targetAmount) * 100));
-            progressText = `Đã tích lũy: ${g.currentAmount.toLocaleString('vi-VN')} / ${g.targetAmount.toLocaleString('vi-VN')} ₫`;
+            progressPct = Math.min(100, Math.round((totalSaved / g.targetAmount) * 100));
+            progressText = `Đã tích lũy: ${totalSaved.toLocaleString('vi-VN')} / ${g.targetAmount.toLocaleString('vi-VN')} ₫`;
         } else if (g.milestones && g.milestones.length > 0) {
             const comp = g.milestones.filter(m => m.completed).length;
             progressPct = Math.round((comp / g.milestones.length) * 100);
@@ -2094,6 +2266,7 @@ function renderGoalsView() {
                     </span>
                 </div>
                 <div class="debt-card-actions">
+                    <button class="btn-action-small" onclick="openSavingsModal('${g.id}')" title="Tích góp thêm" ${progressPct >= 100 && g.targetAmount > 0 ? 'disabled style="opacity:0.25; pointer-events:none;"' : ''}><i data-lucide="piggy-bank"></i></button>
                     <button class="btn-action-small" onclick="handleEditGoal('${g.id}')" title="Sửa mục tiêu"><i data-lucide="edit-2"></i></button>
                     <button class="btn-action-small btn-delete" onclick="handleDeleteGoal('${g.id}')" title="Xóa"><i data-lucide="trash-2"></i></button>
                 </div>
@@ -2420,6 +2593,9 @@ function initAppComponents() {
     const repaymentForm = document.getElementById("repayment-form");
     if (repaymentForm) repaymentForm.addEventListener("submit", handleSaveRepayment);
 
+    const savingsForm = document.getElementById("savings-form");
+    if (savingsForm) savingsForm.addEventListener("submit", handleSaveSavings);
+
     // 8. OCR scanner initialization
     initOCRScanner();
 
@@ -2590,6 +2766,8 @@ window.handleEditDebt = handleEditDebt;
 window.handleDeleteDebt = handleDeleteDebt;
 window.openRepaymentModal = openRepaymentModal;
 window.deleteRepayment = deleteRepayment;
+window.openSavingsModal = openSavingsModal;
+window.deleteSaving = deleteSaving;
 window.moveTask = moveTask;
 window.handleEditGoal = handleEditGoal;
 window.handleDeleteGoal = handleDeleteGoal;

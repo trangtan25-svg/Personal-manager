@@ -24,7 +24,7 @@ const SECURITY_TOKEN = "PersonalManagerHub2026";
 const SCHEMAS = {
   "Thu_Nhap": ["ID", "Amount", "Category", "Date", "Notes", "Type"],
   "Khoan_No": ["ID", "Creditor", "Amount", "Type", "InterestRate", "DueDate", "Status", "Repayments"],
-  "Ke_Hoach": ["ID", "Title", "TargetAmount", "CurrentAmount", "DueDate", "Timeframe", "Milestones"],
+  "Ke_Hoach": ["ID", "Title", "TargetAmount", "CurrentAmount", "DueDate", "Timeframe", "Milestones", "Savings"],
   "Cong_Viec": ["ID", "Title", "Description", "Status", "DueDate", "Priority"],
   "Ghi_Chu": ["ID", "Title", "Content", "CreatedAt"],
   "Tep_Tin": ["ID", "Name", "Type", "Size", "UploadedAt"]
