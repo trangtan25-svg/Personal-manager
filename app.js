@@ -2566,3 +2566,26 @@ function updateHeaderClockAndGreetings() {
     
     dateText.textContent = `${dayName}, ngày ${day} tháng ${month}, năm ${year}`;
 }
+
+// ==================== BINDING CÁC HÀM TOÀN CỤC CHO INLINE HTML HANDLERS ====================
+window.openModal = openModal;
+window.closeModal = closeModal;
+window.allowDrop = allowDrop;
+window.dragTask = dragTask;
+window.dropTask = dropTask;
+window.handleEditTask = handleEditTask;
+window.handleDeleteTask = handleDeleteTask;
+window.handleEditTransaction = handleEditTransaction;
+window.handleDeleteTransaction = handleDeleteTransaction;
+window.handleEditDebt = handleEditDebt;
+window.handleDeleteDebt = handleDeleteDebt;
+window.openRepaymentModal = openRepaymentModal;
+window.handleEditGoal = handleEditGoal;
+window.handleDeleteGoal = handleDeleteGoal;
+window.toggleMilestone = toggleMilestone;
+window.copyNoteForNotebookLM = copyNoteForNotebookLM;
+window.handleEditNote = handleEditNote;
+window.handleDeleteNote = handleDeleteNote;
+window.togglePinTip = togglePinTip;
+window.handleDeleteStorageFile = handleDeleteStorageFile;
+
