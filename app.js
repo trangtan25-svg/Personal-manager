@@ -23,6 +23,7 @@ let autoSyncInterval = null;
 let isPushing = false;  // Cờ hiệu bảo vệ chống trùng lặp đẩy dữ liệu lên Sheets
 let isPulling = false;  // Cờ hiệu bảo vệ chống trùng lặp kéo dữ liệu từ Sheets
 let lastFocusSyncTime = 0; // Lưu thời gian đồng bộ refocus cuối cùng để chống double trigger
+let lastPushSuccessTime = 0; // Lưu thời gian đẩy dữ liệu thành công cuối cùng để tránh pull trùng lặp
 const LOCK_TIMEOUT = 15 * 60 * 1000; // 15 phút không hoạt động tự động khóa
 
 // Cẩm nang mẹo lưu trữ tài liệu cá nhân mặc định
@@ -117,6 +118,12 @@ document.addEventListener("DOMContentLoaded", () => {
             // Chống double trigger dồn dập (Chỉ chạy tối đa 1 lần mỗi 3 giây)
             const now = Date.now();
             if (now - lastFocusSyncTime < 3000) return;
+            
+            // Tránh chạy Pull ngay lập tức khi vừa thực hiện Push thành công để loại bỏ hoàn toàn khả năng xung đột ghi đè
+            if (now - lastPushSuccessTime < 5000) {
+                console.log("⏭️ [Tự động Refocus] Bỏ qua pull vì vừa đẩy dữ liệu thành công cách đây ít giây.");
+                return;
+            }
             
             if (derivedKey && appState.settings && appState.settings.webAppUrl) {
                 lastFocusSyncTime = now;
@@ -1735,6 +1742,7 @@ function syncAllDataToGoogleSheets(alertSuccess = false) {
         isPushing = false;
         if (resData.success) {
             appState.isDirty = false;
+            lastPushSuccessTime = Date.now();
             saveStateToLocalStorage(false); // Lưu trạng thái sạch sẽ
             
             if (indicator) {
@@ -1796,7 +1804,7 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
         indicator.querySelector(".status-text").textContent = "Đang tải...";
     }
     
-    const requestUrl = `${webAppUrl}?token=${encodeURIComponent(syncToken)}`;
+    const requestUrl = `${webAppUrl}?token=${encodeURIComponent(syncToken)}&_t=${Date.now()}`;
     
     fetch(requestUrl, { method: "GET", mode: "cors" })
     .then(res => res.json())
