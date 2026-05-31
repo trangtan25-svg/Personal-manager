@@ -323,11 +323,16 @@ function loadStateFromLocalStorage() {
                 
                 // Đảm bảo không bị thiếu các thuộc tính cài đặt mặc định
                 if (!appState.settings) {
-                    appState.settings = {
-                        sheetUrl: "https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit?gid=0#gid=0",
-                        webAppUrl: "",
-                        syncToken: "PersonalManagerHub2026"
-                    };
+                    appState.settings = {};
+                }
+                if (!appState.settings.sheetUrl) {
+                    appState.settings.sheetUrl = "https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit?gid=0#gid=0";
+                }
+                if (appState.settings.webAppUrl === undefined) {
+                    appState.settings.webAppUrl = "";
+                }
+                if (!appState.settings.syncToken) {
+                    appState.settings.syncToken = "PersonalManagerHub2026";
                 }
                 
                 // Tự động kiểm tra và áp dụng URL Google Sheets từ Biến môi trường Vercel (nếu có)
@@ -413,12 +418,15 @@ function renderAppsScriptCode() {
     
     // Đọc mã Apps Script bằng JS và dán vào
     fetch("google-apps-script.js")
-        .then(res => res.text())
+        .then(res => {
+            if (!res.ok) throw new Error("File not found");
+            return res.text();
+        })
         .then(code => {
             displayElement.textContent = code;
         })
         .catch(() => {
-            displayElement.textContent = "Không tìm thấy tệp tin chứa mã google-apps-script.js trong thư mục dự án cục bộ do quy chế bảo mật File:// của trình duyệt. Vui lòng copy trực tiếp từ file google-apps-script.js bằng Notepad hoặc từ tin nhắn chat của trợ lý AI!";
+            displayElement.textContent = "Không tìm thấy tệp tin chứa mã google-apps-script.js trong thư mục triển khai tĩnh hoặc do quy chế bảo mật của trình duyệt. Bạn có thể sao chép trực tiếp mã nguồn này từ tệp tin google-apps-script.js trong thư mục dự án hoặc sao chép từ tin nhắn chat của trợ lý AI!";
         });
 }
 
