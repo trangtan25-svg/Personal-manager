@@ -233,6 +233,16 @@ h1, h2, h3, h4, h5, h6 {
     min-height: 44px;
 }
 
+select.form-input, select.filter-select, select {
+    background-color: #1a1a24 !important; /* Dùng nền tối đặc để ép trình duyệt render danh sách màu tối */
+    color: #ffffff !important;
+}
+
+select option {
+    background-color: #1a1a24 !important;
+    color: #ffffff !important;
+}
+
 .form-input:focus, .filter-select:focus {
     border-color: var(--color-primary);
     background: rgba(255, 255, 255, 0.08);

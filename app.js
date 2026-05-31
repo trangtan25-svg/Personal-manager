@@ -512,6 +512,70 @@ function updateCategoryDropdown(typeSelectId, categorySelectId) {
     });
 }
 
+function handleTransactionCategoryChange() {
+    const catSelect = document.getElementById("trans-category");
+    const linkGroup = document.getElementById("trans-link-group");
+    const linkLabel = document.getElementById("trans-link-label");
+    const linkSelect = document.getElementById("trans-link-id");
+    
+    if (!catSelect || !linkGroup || !linkLabel || !linkSelect) return;
+    
+    const cat = catSelect.value;
+    
+    if (cat === "Trả khoản nợ") {
+        linkGroup.classList.remove("hidden");
+        linkLabel.textContent = "Liên kết với Khoản nợ cần thanh toán đợt";
+        linkSelect.innerHTML = '<option value="">-- Chọn khoản nợ cần trả --</option>';
+        
+        // Chỉ lấy nợ chưa trả hết
+        const activeDebts = appState.debts.filter(d => {
+            const paid = d.repayments ? d.repayments.reduce((s, r) => s + r.amount, 0) : 0;
+            return d.status !== 'paid' && paid < d.amount;
+        });
+        
+        if (activeDebts.length === 0) {
+            linkSelect.innerHTML = '<option value="">⚠️ Không có khoản nợ hoạt động</option>';
+        } else {
+            activeDebts.forEach(d => {
+                const paid = d.repayments ? d.repayments.reduce((s, r) => s + r.amount, 0) : 0;
+                const remaining = d.amount - paid;
+                const opt = document.createElement("option");
+                opt.value = d.id;
+                opt.textContent = `${d.creditor} (Còn nợ: ${remaining.toLocaleString('vi-VN')} ₫)`;
+                linkSelect.appendChild(opt);
+            });
+        }
+    } else if (cat === "Đầu tư / Tiết kiệm") {
+        linkGroup.classList.remove("hidden");
+        linkLabel.textContent = "Liên kết với Kế hoạch mục tiêu tích góp";
+        linkSelect.innerHTML = '<option value="">-- Chọn kế hoạch cần tích góp --</option>';
+        
+        // Lấy kế hoạch chưa đạt mục tiêu
+        const activeGoals = appState.goals.filter(g => {
+            if (g.targetAmount === 0) return true; // Không giới hạn
+            const saved = g.savings ? g.savings.reduce((s, x) => s + x.amount, 0) : g.currentAmount;
+            return saved < g.targetAmount;
+        });
+        
+        if (activeGoals.length === 0) {
+            linkSelect.innerHTML = '<option value="">⚠️ Không có kế hoạch hoạt động</option>';
+        } else {
+            activeGoals.forEach(g => {
+                const saved = g.savings ? g.savings.reduce((s, x) => s + x.amount, 0) : g.currentAmount;
+                const remaining = g.targetAmount > 0 ? g.targetAmount - saved : 0;
+                const opt = document.createElement("option");
+                opt.value = g.id;
+                opt.textContent = `${g.title} (Còn thiếu: ${remaining.toLocaleString('vi-VN')} ₫)`;
+                linkSelect.appendChild(opt);
+            });
+        }
+    } else {
+        linkGroup.classList.add("hidden");
+        linkSelect.innerHTML = "";
+        linkSelect.value = "";
+    }
+}
+
 // Cài đặt bộ quét OCR ảnh chuyển khoản ngân hàng bằng Tesseract.js cục bộ
 function initOCRScanner() {
     const dropZone = document.getElementById("ocr-drop-zone");
@@ -705,6 +769,7 @@ function handleSaveTransaction(e) {
     const amount = parseFloat(document.getElementById("trans-amount").value);
     const category = document.getElementById("trans-category").value;
     const notes = document.getElementById("trans-notes").value.trim();
+    const linkId = document.getElementById("trans-link-id") ? document.getElementById("trans-link-id").value : "";
     
     if (isNaN(amount) || amount <= 0) {
         alert("Số tiền giao dịch phải lớn hơn 0 ₫.");
@@ -727,6 +792,39 @@ function handleSaveTransaction(e) {
     } else {
         // Thêm giao dịch mới
         appState.transactions.push(newTrans);
+        
+        // Xử lý liên kết tự động tới Khoản nợ hoặc Kế hoạch mục tiêu
+        if (linkId) {
+            if (category === "Trả khoản nợ") {
+                const debt = appState.debts.find(d => d.id === linkId);
+                if (debt) {
+                    if (!debt.repayments) debt.repayments = [];
+                    debt.repayments.push({
+                        id: "rep-" + Date.now(),
+                        amount: amount,
+                        date: date
+                    });
+                    // Cập nhật trạng thái nợ nếu trả hết
+                    const totalPaid = debt.repayments.reduce((s, r) => s + r.amount, 0);
+                    if (totalPaid >= debt.amount) {
+                        debt.status = "paid";
+                    } else {
+                        debt.status = "active";
+                    }
+                }
+            } else if (category === "Đầu tư / Tiết kiệm") {
+                const goal = appState.goals.find(g => g.id === linkId);
+                if (goal) {
+                    if (!goal.savings) goal.savings = [];
+                    goal.savings.push({
+                        id: "save-" + Date.now(),
+                        amount: amount,
+                        date: date
+                    });
+                    goal.currentAmount = goal.savings.reduce((s, x) => s + x.amount, 0);
+                }
+            }
+        }
     }
     
     saveStateToLocalStorage();
@@ -739,6 +837,7 @@ function handleSaveTransaction(e) {
     document.getElementById("ocr-file-input").value = "";
     
     updateCategoryDropdown("trans-type", "trans-category");
+    handleTransactionCategoryChange();
     renderAllViews();
     alert("Lưu giao dịch thành công!");
 }
@@ -780,6 +879,8 @@ function handleSaveDebt(e) {
     const creditor = document.getElementById("debt-creditor").value.trim();
     const type = document.getElementById("debt-type").value;
     const interestRate = parseFloat(document.getElementById("debt-interest").value) || 0;
+    const installmentsCount = parseInt(document.getElementById("debt-installments-count").value) || 0;
+    const installmentAmount = parseFloat(document.getElementById("debt-installment-amount").value) || 0;
     const amount = parseFloat(document.getElementById("debt-amount").value);
     const dueDate = document.getElementById("debt-due-date").value;
     const status = document.getElementById("debt-status").value;
@@ -795,7 +896,9 @@ function handleSaveDebt(e) {
         interestRate,
         dueDate,
         status,
-        repayments
+        repayments,
+        installmentsCount,
+        installmentAmount
     };
     
     if (id) {
@@ -964,6 +1067,8 @@ function handleSaveGoal(e) {
     const title = document.getElementById("goal-title").value.trim();
     const timeframe = document.getElementById("goal-timeframe").value;
     const dueDate = document.getElementById("goal-due-date").value;
+    const installmentsCount = parseInt(document.getElementById("goal-installments-count").value) || 0;
+    const installmentAmount = parseFloat(document.getElementById("goal-installment-amount").value) || 0;
     const targetAmount = parseFloat(document.getElementById("goal-target-amount").value) || 0;
     const currentAmount = parseFloat(document.getElementById("goal-current-amount").value) || 0;
     const milestonesStr = document.getElementById("goal-milestones-input").value.trim();
@@ -1022,7 +1127,9 @@ function handleSaveGoal(e) {
         targetAmount,
         currentAmount: finalCurrentAmount,
         milestones,
-        savings
+        savings,
+        installmentsCount,
+        installmentAmount
     };
     
     if (id) {
@@ -1590,7 +1697,9 @@ function syncAllDataToGoogleSheets(alertSuccess = false) {
                 return { 
                     "ID": d.id, "Creditor": d.creditor, "Amount": d.amount, "Type": d.type, 
                     "InterestRate": d.interestRate, "DueDate": d.dueDate, "Status": d.status,
-                    "Repayments": JSON.stringify(d.repayments)
+                    "Repayments": JSON.stringify(d.repayments),
+                    "InstallmentsCount": d.installmentsCount || 0,
+                    "InstallmentAmount": d.installmentAmount || 0
                 };
             }),
             "Ke_Hoach": appState.goals.map(g => {
@@ -1598,7 +1707,9 @@ function syncAllDataToGoogleSheets(alertSuccess = false) {
                     "ID": g.id, "Title": g.title, "TargetAmount": g.targetAmount, "CurrentAmount": g.currentAmount, 
                     "DueDate": g.dueDate, "Timeframe": g.timeframe, 
                     "Milestones": JSON.stringify(g.milestones),
-                    "Savings": JSON.stringify(g.savings || [])
+                    "Savings": JSON.stringify(g.savings || []),
+                    "InstallmentsCount": g.installmentsCount || 0,
+                    "InstallmentAmount": g.installmentAmount || 0
                 };
             }),
             "Cong_Viec": appState.tasks.map(t => {
@@ -1710,7 +1821,9 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
                     return { 
                         id: d.id, creditor: d.creditor, amount: parseFloat(d.amount) || 0, type: d.type, 
                         interestRate: parseFloat(d.interestrate) || 0, dueDate: d.duedate, status: d.status,
-                        repayments: reps
+                        repayments: reps,
+                        installmentsCount: parseInt(d.installmentscount) || 0,
+                        installmentAmount: parseFloat(d.installmentamount) || 0
                     };
                 });
             }
@@ -1724,7 +1837,9 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
                     try { if (g.savings) svs = JSON.parse(g.savings); } catch(e){}
                     return {
                         id: g.id, title: g.title, targetAmount: parseFloat(g.targetamount) || 0, currentAmount: parseFloat(g.currentamount) || 0,
-                        dueDate: g.duedate, timeframe: g.timeframe, milestones: ms, savings: svs
+                        dueDate: g.duedate, timeframe: g.timeframe, milestones: ms, savings: svs,
+                        installmentsCount: parseInt(g.installmentscount) || 0,
+                        installmentAmount: parseFloat(g.installmentamount) || 0
                     };
                 });
             }
@@ -2161,6 +2276,17 @@ function renderDebtsView() {
         const remaining = d.amount - totalPaid;
         const progressPct = d.amount > 0 ? Math.round((totalPaid / d.amount) * 100) : 100;
         
+        let installmentsHTML = "";
+        if (d.installmentsCount > 0 && d.installmentAmount > 0) {
+            const paidReps = d.repayments ? d.repayments.length : 0;
+            installmentsHTML = `
+                <div class="debt-installments-badge" style="font-size:11px; color:var(--color-primary); background:rgba(124,58,237,0.1); padding:4px 8px; border-radius:4px; margin-top:4px; display:inline-block;">
+                    <i data-lucide="calendar-days" style="width:12px; height:12px; display:inline-block; vertical-align:middle; margin-right:4px;"></i>
+                    Kế hoạch: ${paidReps}/${d.installmentsCount} đợt (mỗi đợt ${d.installmentAmount.toLocaleString('vi-VN')} ₫)
+                </div>
+            `;
+        }
+        
         const card = document.createElement("div");
         card.className = `glass-card debt-card ${d.type === 'owe_others' ? 'debt-payable' : 'debt-receivable'}`;
         card.innerHTML = `
@@ -2181,6 +2307,7 @@ function renderDebtsView() {
             <div class="debt-amount-row">
                 <p style="font-size:11px; color:var(--text-muted);">Số nợ ban đầu: ${d.amount.toLocaleString('vi-VN')} ₫</p>
                 <h2>${remaining.toLocaleString('vi-VN')} ₫</h2>
+                ${installmentsHTML}
             </div>
             
             <div class="debt-progress-section" style="display:flex; flex-direction:column; gap:6px;">
@@ -2240,6 +2367,17 @@ function renderGoalsView() {
             progressText = "Tiến độ: 0%";
         }
         
+        let goalInstallmentsHTML = "";
+        if (g.installmentsCount > 0 && g.installmentAmount > 0) {
+            const savedInstallments = g.savings ? g.savings.length : 0;
+            goalInstallmentsHTML = `
+                <div class="goal-installments-badge" style="font-size:11px; color:var(--color-success); background:rgba(16,185,129,0.1); padding:4px 8px; border-radius:4px; margin-top:6px; display:inline-block;">
+                    <i data-lucide="piggy-bank" style="width:12px; height:12px; display:inline-block; vertical-align:middle; margin-right:4px;"></i>
+                    Kế hoạch: ${savedInstallments}/${g.installmentsCount} đợt (mỗi đợt ${g.installmentAmount.toLocaleString('vi-VN')} ₫)
+                </div>
+            `;
+        }
+        
         const card = document.createElement("div");
         card.className = "glass-card goal-card";
         
@@ -2280,6 +2418,7 @@ function renderGoalsView() {
                 <div class="debt-progress-bar-container">
                     <div class="debt-progress-bar-fill goal-progress-bar-fill" style="width: ${progressPct}%"></div>
                 </div>
+                ${goalInstallmentsHTML}
             </div>
             
             ${milestonesHTML}
@@ -2301,6 +2440,8 @@ function handleEditDebt(id) {
     document.getElementById("debt-creditor").value = debt.creditor;
     document.getElementById("debt-type").value = debt.type;
     document.getElementById("debt-interest").value = debt.interestRate;
+    document.getElementById("debt-installments-count").value = debt.installmentsCount || "";
+    document.getElementById("debt-installment-amount").value = debt.installmentAmount || "";
     document.getElementById("debt-amount").value = debt.amount;
     document.getElementById("debt-due-date").value = debt.dueDate;
     document.getElementById("debt-status").value = debt.status;
@@ -2317,6 +2458,8 @@ function handleEditGoal(id) {
     document.getElementById("goal-title").value = goal.title;
     document.getElementById("goal-timeframe").value = goal.timeframe;
     document.getElementById("goal-due-date").value = goal.dueDate;
+    document.getElementById("goal-installments-count").value = goal.installmentsCount || "";
+    document.getElementById("goal-installment-amount").value = goal.installmentAmount || "";
     document.getElementById("goal-target-amount").value = goal.targetAmount;
     document.getElementById("goal-current-amount").value = goal.currentAmount;
     
@@ -2515,11 +2658,17 @@ function initAppComponents() {
 
     // 4. Lắng nghe sự kiện Thay đổi loại thu chi và tự nhận diện Categories
     const transTypeInput = document.getElementById("trans-type");
-    if (transTypeInput) {
+    const transCatInput = document.getElementById("trans-category");
+    if (transTypeInput && transCatInput) {
         transTypeInput.addEventListener("change", () => {
             updateCategoryDropdown("trans-type", "trans-category");
+            handleTransactionCategoryChange();
+        });
+        transCatInput.addEventListener("change", () => {
+            handleTransactionCategoryChange();
         });
         updateCategoryDropdown("trans-type", "trans-category");
+        handleTransactionCategoryChange();
     }
 
     // 5. Đăng ký sự kiện nộp Form Giao dịch
@@ -2535,6 +2684,7 @@ function initAppComponents() {
             document.getElementById("ocr-preview-container").classList.add("hidden");
             document.getElementById("ocr-file-input").value = "";
             updateCategoryDropdown("trans-type", "trans-category");
+            handleTransactionCategoryChange();
         });
     }
 
@@ -2558,6 +2708,8 @@ function initAppComponents() {
         addDebtBtn.addEventListener("click", () => {
             document.getElementById("debt-form").reset();
             document.getElementById("debt-id").value = "";
+            document.getElementById("debt-installments-count").value = "";
+            document.getElementById("debt-installment-amount").value = "";
             document.getElementById("debt-modal-title").textContent = "Ghi nhận khoản nợ mới";
             openModal("modal-debt");
         });
@@ -2565,17 +2717,83 @@ function initAppComponents() {
     const debtForm = document.getElementById("debt-form");
     if (debtForm) debtForm.addEventListener("submit", handleSaveDebt);
 
+    // Bộ tính toán tự động thông minh cho Khoản nợ (Smart Debt Calculations)
+    const debtInstallmentsCount = document.getElementById("debt-installments-count");
+    const debtInstallmentAmount = document.getElementById("debt-installment-amount");
+    const debtAmount = document.getElementById("debt-amount");
+
+    if (debtInstallmentsCount && debtInstallmentAmount && debtAmount) {
+        const calcDebtAmountFromInstallments = () => {
+            const count = parseInt(debtInstallmentsCount.value) || 0;
+            const instAmount = parseFloat(debtInstallmentAmount.value) || 0;
+            if (count > 0 && instAmount > 0) {
+                debtAmount.value = count * instAmount;
+            }
+        };
+
+        const calcDebtInstallmentsFromAmount = () => {
+            const amount = parseFloat(debtAmount.value) || 0;
+            const count = parseInt(debtInstallmentsCount.value) || 0;
+            const instAmount = parseFloat(debtInstallmentAmount.value) || 0;
+            if (amount > 0) {
+                if (count > 0) {
+                    debtInstallmentAmount.value = Math.round(amount / count);
+                } else if (instAmount > 0) {
+                    debtInstallmentsCount.value = Math.ceil(amount / instAmount);
+                }
+            }
+        };
+
+        debtInstallmentsCount.addEventListener("input", calcDebtAmountFromInstallments);
+        debtInstallmentAmount.addEventListener("input", calcDebtAmountFromInstallments);
+        debtAmount.addEventListener("input", calcDebtInstallmentsFromAmount);
+    }
+
     const addGoalBtn = document.getElementById("btn-add-goal-modal");
     if (addGoalBtn) {
         addGoalBtn.addEventListener("click", () => {
             document.getElementById("goal-form").reset();
             document.getElementById("goal-id").value = "";
+            document.getElementById("goal-installments-count").value = "";
+            document.getElementById("goal-installment-amount").value = "";
             document.getElementById("goal-modal-title").textContent = "Thêm kế hoạch mới";
             openModal("modal-goal");
         });
     }
     const goalForm = document.getElementById("goal-form");
     if (goalForm) goalForm.addEventListener("submit", handleSaveGoal);
+
+    // Bộ tính toán tự động thông minh cho Kế hoạch (Smart Goal Calculations)
+    const goalInstallmentsCount = document.getElementById("goal-installments-count");
+    const goalInstallmentAmount = document.getElementById("goal-installment-amount");
+    const goalTargetAmount = document.getElementById("goal-target-amount");
+
+    if (goalInstallmentsCount && goalInstallmentAmount && goalTargetAmount) {
+        const calcGoalAmountFromInstallments = () => {
+            const count = parseInt(goalInstallmentsCount.value) || 0;
+            const instAmount = parseFloat(goalInstallmentAmount.value) || 0;
+            if (count > 0 && instAmount > 0) {
+                goalTargetAmount.value = count * instAmount;
+            }
+        };
+
+        const calcGoalInstallmentsFromAmount = () => {
+            const amount = parseFloat(goalTargetAmount.value) || 0;
+            const count = parseInt(goalInstallmentsCount.value) || 0;
+            const instAmount = parseFloat(goalInstallmentAmount.value) || 0;
+            if (amount > 0) {
+                if (count > 0) {
+                    goalInstallmentAmount.value = Math.round(amount / count);
+                } else if (instAmount > 0) {
+                    goalInstallmentsCount.value = Math.ceil(amount / instAmount);
+                }
+            }
+        };
+
+        goalInstallmentsCount.addEventListener("input", calcGoalAmountFromInstallments);
+        goalInstallmentAmount.addEventListener("input", calcGoalAmountFromInstallments);
+        goalTargetAmount.addEventListener("input", calcGoalInstallmentsFromAmount);
+    }
 
     const addTaskBtn = document.getElementById("btn-add-task-modal");
     if (addTaskBtn) {

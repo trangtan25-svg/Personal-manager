@@ -276,6 +276,12 @@
                                             <!-- Tùy chọn sẽ thay đổi dựa trên Loại thu/chi qua JS -->
                                         </select>
                                     </div>
+                                    <div class="form-group hidden" id="trans-link-group" style="border-left: 2px solid var(--color-primary); padding-left: 10px; margin-top: 10px;">
+                                        <label id="trans-link-label" for="trans-link-id">Liên kết đối tượng</label>
+                                        <select id="trans-link-id" class="form-input">
+                                            <!-- Sẽ hiển thị danh sách nợ hoặc kế hoạch tích góp qua JS -->
+                                        </select>
+                                    </div>
                                     <div class="form-group">
                                         <label for="trans-notes">Ghi chú / Chi tiết</label>
                                         <textarea id="trans-notes" class="form-input" placeholder="Nhập ghi chú giao dịch..." rows="3"></textarea>
@@ -711,6 +717,16 @@
                 </div>
                 <div class="form-group-row">
                     <div class="form-group">
+                        <label for="debt-installments-count">Số đợt trả nợ <span class="input-optional">(Tùy chọn)</span></label>
+                        <input type="number" id="debt-installments-count" class="form-input" placeholder="Ví dụ: 12 đợt..." min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="debt-installment-amount">Số tiền mỗi đợt (₫) <span class="input-optional">(Tùy chọn)</span></label>
+                        <input type="number" id="debt-installment-amount" class="form-input" placeholder="Nhập số tiền mỗi đợt..." min="0">
+                    </div>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
                         <label for="debt-amount">Số tiền nợ (₫)</label>
                         <input type="number" id="debt-amount" class="form-input-highlight" placeholder="Nhập số tiền..." required>
                     </div>
@@ -840,6 +856,16 @@
                     <div class="form-group">
                         <label for="goal-due-date">Hạn đạt mục tiêu</label>
                         <input type="date" id="goal-due-date" class="form-input" required>
+                    </div>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label for="goal-installments-count">Số đợt tích góp <span class="input-optional">(Tùy chọn)</span></label>
+                        <input type="number" id="goal-installments-count" class="form-input" placeholder="Ví dụ: 10 đợt..." min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="goal-installment-amount">Mỗi đợt tích góp (₫) <span class="input-optional">(Tùy chọn)</span></label>
+                        <input type="number" id="goal-installment-amount" class="form-input" placeholder="Nhập số tiền mỗi đợt..." min="0">
                     </div>
                 </div>
                 <div class="form-group-row">
