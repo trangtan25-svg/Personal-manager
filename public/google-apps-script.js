@@ -348,3 +348,21 @@ function createJsonResponse(obj, statusCode = 200) {
   return ContentService.createTextOutput(JSONString)
     .setMimeType(ContentService.MimeType.JSON);
 }
+
+// --- HÀM BỔ TRỢ KÍCH HOẠT HỘP THOẠI CẤP QUYỀN TRUY CẬP DRIVE CỦA GOOGLE ---
+// Cách dùng: Chọn hàm này trên thanh công cụ của Apps Script và nhấn nút "Chạy" (Run) để kích hoạt phê duyệt quyền truy cập Drive!
+function testDriveAccess() {
+  try {
+    var folderName = "PersonalManagerHub_Storage";
+    var folders = DriveApp.getFoldersByName(folderName);
+    var folder;
+    if (folders.hasNext()) {
+      folder = folders.next();
+    } else {
+      folder = DriveApp.createFolder(folderName);
+    }
+    console.log("✅ Kết nối Drive thành công! Thư mục hoạt động: " + folder.getName() + " (ID: " + folder.getId() + ")");
+  } catch (err) {
+    console.error("❌ Lỗi kết nối Drive: " + err.toString());
+  }
+}
