@@ -1203,181 +1203,8 @@ function exportAllDataToNotebookLM() {
     });
 }
 
-// --- 4. KHO LƯU TRỮ TÀI LIỆU GIẢ LẬP & MẸO HAY ---
-function initVirtualStorage() {
-    const dropZone = document.getElementById("storage-drop-zone");
-    const fileInput = document.getElementById("storage-file-input");
-    
-    if (!dropZone || !fileInput) return;
-    
-    dropZone.addEventListener("click", () => fileInput.click());
-    
-    dropZone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        dropZone.classList.add("dragover");
-    });
-    
-    dropZone.addEventListener("dragleave", () => {
-        dropZone.classList.remove("dragover");
-    });
-    
-    dropZone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        dropZone.classList.remove("dragover");
-        if (e.dataTransfer.files.length > 0) {
-            handleUploadFiles(e.dataTransfer.files);
-        }
-    });
-    
-    fileInput.addEventListener("change", (e) => {
-        if (e.target.files.length > 0) {
-            handleUploadFiles(e.target.files);
-        }
-    });
-    
-    function handleUploadFiles(files) {
-        if (!appState.settings.webAppUrl) {
-            alert("Bạn cần cấu hình Google Apps Script Web App trong Cài đặt trước khi tải tệp lên Google Drive!");
-            return;
-        }
-        
-        const pTag = dropZone.querySelector("p");
-        const originalText = pTag ? pTag.textContent : "Nhấp hoặc kéo thả tài liệu để lưu trữ";
-        
-        if (pTag) {
-            pTag.innerHTML = `<span class="spinner" style="display:inline-block; vertical-align:middle; margin-right:8px; width:16px; height:16px; border-width:2px;"></span> Đang tải tệp lên Google Drive...`;
-            dropZone.style.pointerEvents = "none";
-        }
-        
-        // Xử lý đệ quy tuần tự từng tệp tin
-        let uploadCount = 0;
-        
-        function uploadNextFile(index) {
-            if (index >= files.length) {
-                // Hoàn tất tải lên toàn bộ
-                if (pTag) {
-                    pTag.textContent = originalText;
-                    dropZone.style.pointerEvents = "auto";
-                }
-                fileInput.value = "";
-                
-                saveStateToLocalStorage();
-                triggerAutoSync();
-                renderAllViews();
-                alert(`Đã tải lên thành công ${uploadCount}/${files.length} tệp tin trực tiếp vào Google Drive của bạn!`);
-                return;
-            }
-            
-            const file = files[index];
-            
-            // Đọc nội dung tệp tin sang Base64
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const dataUrl = e.target.result;
-                const base64String = dataUrl.split(",")[1];
-                
-                const payload = {
-                    token: appState.settings.syncToken,
-                    action: "uploadFile",
-                    fileName: file.name,
-                    fileType: file.type || "application/octet-stream",
-                    fileData: base64String
-                };
-                
-                fetch(appState.settings.webAppUrl, {
-                    method: "POST",
-                    mode: "cors",
-                    headers: { "Content-Type": "text/plain" },
-                    body: JSON.stringify(payload)
-                })
-                .then(res => res.json())
-                .then(resData => {
-                    if (resData.success) {
-                        const fileMeta = {
-                            id: resData.fileId,
-                            name: resData.fileName,
-                            type: file.type || "application/octet-stream",
-                            size: formatBytes(resData.fileSize),
-                            uploadedAt: new Date().toLocaleDateString('vi-VN'),
-                            driveUrl: resData.fileUrl,
-                            downloadUrl: resData.downloadUrl
-                        };
-                        appState.storageFiles.push(fileMeta);
-                        uploadCount++;
-                    } else {
-                        console.error("Lỗi tải tệp lên Drive:", resData.error);
-                        alert(`Không thể tải tệp "${file.name}" lên Drive: ${resData.error}`);
-                    }
-                    uploadNextFile(index + 1);
-                })
-                .catch(err => {
-                    console.error("Lỗi kết nối khi tải tệp:", err);
-                    alert(`Lỗi kết nối khi tải tệp "${file.name}": ${err.message}`);
-                    uploadNextFile(index + 1);
-                });
-            };
-            
-            reader.onerror = function() {
-                alert(`Lỗi đọc tệp tin cục bộ: "${file.name}"`);
-                uploadNextFile(index + 1);
-            };
-            
-            reader.readAsDataURL(file);
-        }
-        
-        uploadNextFile(0);
-    }
-}
-
-function handleDeleteStorageFile(id) {
-    if (confirm("Bạn có chắc chắn muốn xóa tài liệu này khỏi kho lưu trữ và Google Drive?")) {
-        const file = appState.storageFiles.find(f => f.id === id);
-        
-        // Tiến hành xóa cục bộ ngay lập tức để phản hồi nhanh UI
-        appState.storageFiles = appState.storageFiles.filter(f => f.id !== id);
-        saveStateToLocalStorage();
-        renderAllViews();
-        
-        // Gọi API Apps Script ngầm để xóa tệp trên Google Drive
-        if (file && file.id && appState.settings.webAppUrl && file.id.startsWith("file-") === false) {
-            const payload = {
-                token: appState.settings.syncToken,
-                action: "deleteFile",
-                fileId: file.id
-            };
-            
-            fetch(appState.settings.webAppUrl, {
-                method: "POST",
-                mode: "cors",
-                headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify(payload)
-            })
-            .then(res => res.json())
-            .then(resData => {
-                if (resData.success) {
-                    console.log(`Đã xóa tệp "${file.name}" khỏi Google Drive.`);
-                    triggerAutoSync(); // Cập nhật lại spreadsheet
-                } else {
-                    console.warn("Lỗi xóa tệp trên Google Drive:", resData.error);
-                }
-            })
-            .catch(err => {
-                console.warn("Lỗi kết nối khi xóa tệp trên Drive:", err.message);
-            });
-        } else {
-            triggerAutoSync();
-        }
-    }
-}
-
-function formatBytes(bytes, decimals = 2) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-}
+// --- 4. KHO LƯU TRỮ VÀ MẸO HAY ---
+// Đã loại bỏ các chức năng tải và xóa tệp tin để tối ưu hóa hiệu năng duyệt web theo yêu cầu người dùng.
 
 function togglePinTip(tipId) {
     const tips = JSON.parse(localStorage.getItem("pmh_storage_tips")) || INITIAL_STORAGE_TIPS;
@@ -1900,7 +1727,7 @@ function renderAllViews() {
     renderGoalsView();
     renderWorkspaceTasksView();
     renderWorkspaceNotesView();
-    renderStorageFilesView();
+    // Đã loại bỏ tải tệp tin theo yêu cầu người dùng
     renderStorageTips();
 }
 
@@ -2325,36 +2152,7 @@ function renderWorkspaceNotesView() {
     safeCreateIcons();
 }
 
-function renderStorageFilesView() {
-    const container = document.getElementById("storage-files-container");
-    if (!container) return;
-    
-    container.innerHTML = "";
-    
-    if (appState.storageFiles.length === 0) {
-        container.innerHTML = `<p class="empty-text">Kho lưu trữ chưa có hồ sơ nào. Hãy tải lên hóa đơn, hợp đồng ở trên.</p>`;
-        return;
-    }
-    
-    const list = [...appState.storageFiles].reverse();
-    list.forEach(f => {
-        const item = document.createElement("div");
-        item.className = "file-item";
-        item.innerHTML = `
-            <a href="${f.driveUrl || '#'}" target="_blank" class="file-info-link" style="display:flex; align-items:center; gap:12px; text-decoration:none; color:inherit; flex-grow:1; cursor:pointer;" title="Nhấp để xem tệp trên Google Drive">
-                <i data-lucide="file-text" class="file-icon" style="color:var(--color-primary);"></i>
-                <div class="file-name-meta" style="text-align:left;">
-                    <h4 title="${f.name}" style="margin:0; font-size:13px; font-weight:600; color:var(--text-main); line-height:1.3; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${f.name}</h4>
-                    <p style="margin:0; font-size:11px; color:var(--text-muted);">${f.size} | Ngày: ${f.uploadedAt}</p>
-                </div>
-            </a>
-            <button class="btn-action-small btn-delete" onclick="handleDeleteStorageFile('${f.id}')" title="Xóa tài liệu"><i data-lucide="trash-2"></i></button>
-        `;
-        container.appendChild(item);
-    });
-    
-    safeCreateIcons();
-}
+// Đã loại bỏ renderStorageFilesView theo yêu cầu người dùng
 
 function renderStorageTips() {
     const container = document.getElementById("tips-container-list");
@@ -2519,8 +2317,7 @@ function initAppComponents() {
     // 8. OCR scanner initialization
     initOCRScanner();
 
-    // 9. Virtual storage initialization
-    initVirtualStorage();
+    // 9. Đã loại bỏ khởi tạo lưu trữ tệp tin
 
     // 10. NotebookLM export integration button
     const expNlmBtn = document.getElementById("btn-export-notebooklm");
