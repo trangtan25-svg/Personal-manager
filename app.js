@@ -1,0 +1,2311 @@
+// ==================== KHỞI TẠO STATE & BIẾN CẤU HÌNH TOÀN CỤC ====================
+
+// State của ứng dụng (được lưu trữ dưới dạng mã hóa AES trong LocalStorage)
+let appState = {
+    transactions: [],  // Thu nhập & Chi tiêu: { id, type, date, amount, category, notes }
+    debts: [],         // Khoản nợ: { id, creditor, amount, type, interestRate, dueDate, status, repayments: [] }
+    goals: [],         // Kế hoạch: { id, title, targetAmount, currentAmount, dueDate, timeframe, milestones: [] }
+    tasks: [],         // Công việc: { id, title, description, status, priority, dueDate }
+    notes: [],         // Ghi chú: { id, title, content, createdAt }
+    storageFiles: [],  // Tài liệu lưu trữ (Metadata): { id, name, type, size, uploadedAt }
+    settings: {
+        sheetUrl: "https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit?gid=0#gid=0",
+        webAppUrl: "",
+        syncToken: "PersonalManagerHub2026"
+    }
+};
+
+// Khóa giải mã dẫn xuất từ Master Password của người dùng
+let derivedKey = "";
+let autoLockTimer = null;
+const LOCK_TIMEOUT = 15 * 60 * 1000; // 15 phút không hoạt động tự động khóa
+
+// Cẩm nang mẹo lưu trữ tài liệu cá nhân mặc định
+const INITIAL_STORAGE_TIPS = [
+    { id: "tip-1", title: "Đặt tên tệp tin khoa học", content: "Hãy sử dụng chuẩn đặt tên file: `LOAI_YYYYMMDD_TenTaiLieu`. Ví dụ: `WORK_20260531_HopDongLaoDong.pdf`. Cách này giúp bạn tìm kiếm cực nhanh theo năm hoặc loại tài liệu.", pinned: true },
+    { id: "tip-2", title: "Số hóa tài liệu giấy bằng smartphone", content: "Dùng ứng dụng Adobe Scan hoặc Microsoft Lens trên điện thoại quét tài liệu giấy của bạn. Chọn định dạng PDF trắng đen độ phân giải cao để lưu trữ nhẹ và sắc nét nhất trước khi tải lên.", pinned: false },
+    { id: "tip-3", title: "Nguyên tắc bảo mật tài liệu nhạy cảm", content: "Không lưu trữ mật khẩu dưới dạng văn bản thuần (plaintext) trong ghi chú. Với các tài liệu tối mật như bản quét CCCD, Sổ đỏ, hãy nén file zip và đặt mật khẩu mã hóa trước khi lưu lên Google Drive.", pinned: false },
+    { id: "tip-4", title: "Sao lưu (Backup) dữ liệu định kỳ", content: "Mặc dù dữ liệu đã đồng bộ lên Google Sheet, hãy định kỳ sử dụng nút 'Xuất dữ liệu sao lưu (JSON)' trong cài đặt lưu trữ ra ổ cứng ngoài hoặc USB để phòng ngừa sự cố mất tài khoản Google.", pinned: false }
+];
+
+// Danh mục thu chi mặc định
+const CATEGORIES = {
+    income: ["Lương tháng", "Freelance / Dự án ngoài", "Đầu tư / Tiết kiệm", "Kinh doanh", "Quà tặng / Khác"],
+    expense: ["Ăn uống", "Nhà cửa / Điện nước", "Di chuyển / Xăng xe", "Giải trí / Mua sắm", "Y tế / Sức khỏe", "Học tập / Bản thân", "Trả khoản nợ", "Chi tiêu Khác"]
+};
+
+// ==================== KHỞI ĐỘNG ỨNG DỤNG (ENTRY POINT) ====================
+document.addEventListener("DOMContentLoaded", () => {
+    initLockScreen();
+    resetAutoLockTimer();
+    
+    // Đăng ký bộ lắng nghe sự kiện hoạt động của người dùng để reset timer khóa tự động
+    ['mousemove', 'mousedown', 'keypress', 'touchstart', 'scroll'].forEach(evt => {
+        document.addEventListener(evt, resetAutoLockTimer);
+    });
+});
+
+// ==================== A. HỆ THỐNG ĐĂNG NHẬP & BẢO MẬT (LOCK SCREEN LOGIC) ====================
+
+// Kiểm tra xem Mật khẩu chủ đã được thiết lập chưa và hiển thị giao diện phù hợp
+function initLockScreen() {
+    const lockScreen = document.getElementById("lock-screen");
+    const appLayout = document.getElementById("app-layout");
+    const formContainer = document.getElementById("lock-form-container");
+    
+    lockScreen.classList.remove("hidden");
+    appLayout.classList.add("hidden");
+    
+    const isPassphraseSet = localStorage.getItem("pmh_encrypted_key_test") !== null;
+    
+    if (!isPassphraseSet) {
+        // Màn hình khởi tạo mật khẩu lần đầu
+        formContainer.innerHTML = `
+            <p style="font-size: 13px; color: var(--color-primary); margin-bottom: 15px;">Chào mừng! Hãy thiết lập Mật khẩu chủ để kích hoạt mã hóa dữ liệu cục bộ.</p>
+            <div class="form-group">
+                <input type="password" id="setup-pass" class="form-input" placeholder="Tạo mật khẩu mở khóa Hub..." required>
+            </div>
+            <div class="form-group">
+                <input type="password" id="setup-pass-confirm" class="form-input" placeholder="Nhập lại mật khẩu..." required>
+            </div>
+            <button id="btn-setup-lock" class="btn btn-primary-glow w-100" style="margin-top: 10px;">
+                <i data-lucide="key-round"></i> Khởi tạo & Kích hoạt Hub
+            </button>
+        `;
+        
+        document.getElementById("btn-setup-lock").addEventListener("click", handleRegisterMasterPassword);
+    } else {
+        // Màn hình đăng nhập thông thường
+        formContainer.innerHTML = `
+            <div class="form-group" style="position: relative;">
+                <input type="password" id="unlock-pass" class="form-input" placeholder="Nhập mật khẩu của bạn..." required>
+                <button type="button" class="btn-action-small" id="btn-toggle-unlock-pass" style="position: absolute; right: 10px; top: 8px;">
+                    <i data-lucide="eye" style="width: 18px; height: 18px;"></i>
+                </button>
+            </div>
+            <button id="btn-submit-unlock" class="btn btn-primary-glow w-100" style="margin-top: 10px;">
+                <i data-lucide="unlock"></i> Mở khóa Hub cá nhân
+            </button>
+        `;
+        
+        // Nhấn Enter để mở khóa
+        document.getElementById("unlock-pass").addEventListener("keypress", (e) => {
+            if (e.key === "Enter") handleUnlockApp();
+        });
+        
+        document.getElementById("btn-submit-unlock").addEventListener("click", handleUnlockApp);
+        
+        // Nút ẩn hiện mật khẩu
+        const toggleBtn = document.getElementById("btn-toggle-unlock-pass");
+        const passInput = document.getElementById("unlock-pass");
+        toggleBtn.addEventListener("click", () => {
+            if (passInput.type === "password") {
+                passInput.type = "text";
+                toggleBtn.innerHTML = `<i data-lucide="eye-off" style="width: 18px; height: 18px;"></i>`;
+            } else {
+                passInput.type = "password";
+                toggleBtn.innerHTML = `<i data-lucide="eye" style="width: 18px; height: 18px;"></i>`;
+            }
+            lucide.createIcons();
+        });
+    }
+    lucide.createIcons();
+}
+
+// Xử lý tạo Mật khẩu chủ mới lần đầu
+function handleRegisterMasterPassword() {
+    const setupPass = document.getElementById("setup-pass").value.trim();
+    const setupPassConfirm = document.getElementById("setup-pass-confirm").value.trim();
+    const lockCard = document.querySelector(".lock-card");
+    
+    if (!setupPass || setupPass.length < 4) {
+        alert("Mật khẩu phải có độ dài tối thiểu là 4 ký tự.");
+        shakeElement(lockCard);
+        return;
+    }
+    
+    if (setupPass !== setupPassConfirm) {
+        alert("Mật khẩu xác nhận không trùng khớp.");
+        shakeElement(lockCard);
+        return;
+    }
+    
+    try {
+        // Tạo chuỗi kiểm chứng mã hóa
+        derivedKey = CryptoJS.SHA256(setupPass).toString();
+        const testPayload = "encryption-authorized-key";
+        const encryptededTest = CryptoJS.AES.encrypt(testPayload, derivedKey).toString();
+        
+        // Lưu chuỗi kiểm chứng mã hóa lên LocalStorage
+        localStorage.setItem("pmh_encrypted_key_test", encryptededTest);
+        
+        // Lưu dữ liệu trắng mặc định của state mới
+        saveStateToLocalStorage();
+        
+        // Lưu danh sách mẹo lưu trữ mặc định
+        localStorage.setItem("pmh_storage_tips", JSON.stringify(INITIAL_STORAGE_TIPS));
+        
+        alert("Khởi tạo bảo mật thành công! Chào mừng đến với Personal Hub.");
+        unlockAppInterface();
+    } catch (e) {
+        alert("Lỗi bảo mật thiết bị: " + e.message);
+    }
+}
+
+// Xử lý đăng nhập mở khóa
+function handleUnlockApp() {
+    const unlockPass = document.getElementById("unlock-pass").value;
+    const lockCard = document.querySelector(".lock-card");
+    const testPayloadEncrypted = localStorage.getItem("pmh_encrypted_key_test");
+    
+    if (!unlockPass) {
+        shakeElement(lockCard);
+        return;
+    }
+    
+    try {
+        const testKey = CryptoJS.SHA256(unlockPass).toString();
+        const decryptedBytes = CryptoJS.AES.decrypt(testPayloadEncrypted, testKey);
+        const decryptedText = decryptedBytes.toString(CryptoJS.enc.Utf8);
+        
+        if (decryptedText === "encryption-authorized-key") {
+            // Mật khẩu chính xác! Lưu khóa phiên hoạt động
+            derivedKey = testKey;
+            
+            // Giải mã và load State thực tế
+            loadStateFromLocalStorage();
+            unlockAppInterface();
+        } else {
+            // Nhập sai mật khẩu
+            shakeElement(lockCard);
+            const passInput = document.getElementById("unlock-pass");
+            passInput.value = "";
+            passInput.focus();
+        }
+    } catch (err) {
+        shakeElement(lockCard);
+        alert("Giải mã dữ liệu thất bại. Có vẻ tệp bảo mật cục bộ của bạn bị hỏng.");
+    }
+}
+
+// Khóa ứng dụng ngay lập tức
+function lockApp() {
+    derivedKey = "";
+    appState = null;
+    document.getElementById("app-layout").classList.add("hidden");
+    document.getElementById("lock-screen").classList.remove("hidden");
+    initLockScreen();
+}
+
+// Mở khóa giao diện và hiển thị màn hình chính
+function unlockAppInterface() {
+    document.getElementById("lock-screen").classList.add("hidden");
+    document.getElementById("app-layout").classList.remove("hidden");
+    
+    // Tự động khởi tạo giao diện Tabs & Nút điều hướng
+    initNavigation();
+    initAppComponents();
+    renderAllViews();
+    
+    // Tự động test kết nối Google Sheets nếu đã được cài đặt từ trước
+    if (appState.settings && appState.settings.webAppUrl) {
+        testGoogleSheetsConnection(false);
+    }
+}
+
+// Reset bộ đếm tự động khóa
+function resetAutoLockTimer() {
+    if (derivedKey === "") return; // Nếu chưa đăng nhập thì không đếm
+    
+    clearTimeout(autoLockTimer);
+    autoLockTimer = setTimeout(() => {
+        alert("Phiên làm việc của bạn đã hết hạn do không hoạt động. Trang web đã tự động khóa để bảo mật tài chính của bạn.");
+        lockApp();
+    }, LOCK_TIMEOUT);
+}
+
+// Tạo hiệu ứng rung lắc khi có lỗi đăng nhập
+function shakeElement(el) {
+    el.classList.add("shake");
+    setTimeout(() => {
+        el.classList.remove("shake");
+    }, 400);
+}
+
+// ==================== B. MÃ HÓA CỤC BỘ DỮ LIỆU STATE (CRYPTO AES STATE) ====================
+
+// Lưu State đã mã hóa vào LocalStorage
+function saveStateToLocalStorage() {
+    if (!derivedKey) return;
+    try {
+        const stateString = JSON.stringify(appState);
+        const encryptedState = CryptoJS.AES.encrypt(stateString, derivedKey).toString();
+        localStorage.setItem("pmh_encrypted_state_data", encryptedState);
+    } catch (e) {
+        console.error("Không thể mã hóa lưu trữ State: ", e);
+    }
+}
+
+// Tải State đã mã hóa từ LocalStorage và giải mã
+function loadStateFromLocalStorage() {
+    if (!derivedKey) return;
+    const encryptedState = localStorage.getItem("pmh_encrypted_state_data");
+    
+    if (encryptedState) {
+        try {
+            const decryptedBytes = CryptoJS.AES.decrypt(encryptedState, derivedKey);
+            const decryptedText = decryptedBytes.toString(CryptoJS.enc.Utf8);
+            
+            if (decryptedText) {
+                appState = JSON.parse(decryptedText);
+                
+                // Đảm bảo không bị thiếu các thuộc tính cài đặt mặc định
+                if (!appState.settings) {
+                    appState.settings = {
+                        sheetUrl: "https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit?gid=0#gid=0",
+                        webAppUrl: "",
+                        syncToken: "PersonalManagerHub2026"
+                    };
+                }
+            }
+        } catch (e) {
+            console.error("Giải mã State cục bộ thất bại: ", e);
+        }
+    }
+}
+
+// ==================== C. ĐIỀU HƯỚNG TABS & BỐ CỤC (ROUTING & RESPONSIVE TABS) ====================
+
+function initNavigation() {
+    const navItems = document.querySelectorAll(".nav-item");
+    const bottomNavItems = document.querySelectorAll(".bottom-nav-item");
+    const panels = document.querySelectorAll(".tab-panel");
+    
+    function switchTab(tabName) {
+        // Cập nhật trạng thái Active trên thanh Menu Sidebar
+        navItems.forEach(item => {
+            if (item.getAttribute("data-tab") === tabName) {
+                item.classList.add("active");
+            } else {
+                item.classList.remove("active");
+            }
+        });
+        
+        // Cập nhật trạng thái Active trên thanh Bottom Navigation Bar di động
+        bottomNavItems.forEach(item => {
+            if (item.getAttribute("data-tab") === tabName) {
+                item.classList.add("active");
+            } else {
+                item.classList.remove("active");
+            }
+        });
+        
+        // Chuyển đổi Tab Panel thực tế
+        panels.forEach(panel => {
+            if (panel.id === `tab-${tabName}`) {
+                panel.classList.add("active");
+            } else {
+                panel.classList.remove("active");
+            }
+        });
+        
+        // Nếu chuyển sang tab Dashboard hoặc chuyển sang các tab khác, vẽ lại biểu đồ
+        if (tabName === "dashboard") {
+            renderDashboardCharts();
+        }
+    }
+    
+    // Đăng ký sự kiện click cho Sidebar Menu
+    navItems.forEach(item => {
+        item.addEventListener("click", () => {
+            switchTab(item.getAttribute("data-tab"));
+        });
+    });
+    
+    // Đăng ký sự kiện click cho Bottom Navigation Bar di động
+    bottomNavItems.forEach(item => {
+        item.addEventListener("click", () => {
+            switchTab(item.getAttribute("data-tab"));
+        });
+    });
+}
+
+// ==================== D. TRÌNH TẠO MÃ GOOGLE APPS SCRIPT CHO CÀI ĐẶT ====================
+function renderAppsScriptCode() {
+    const displayElement = document.getElementById("apps-script-code-display");
+    if (!displayElement) return;
+    
+    // Đoạn code được chèn dạng văn bản an toàn
+    const scriptFile = `C:\\Users\\Admin\\.gemini\\antigravity\\scratch\\personal-manager\\google-apps-script.js`;
+    
+    // Đọc mã Apps Script bằng JS và dán vào
+    fetch("google-apps-script.js")
+        .then(res => res.text())
+        .then(code => {
+            displayElement.textContent = code;
+        })
+        .catch(() => {
+            displayElement.textContent = "Không tìm thấy mã trong google-apps-script.js. Hãy liên hệ trợ lý AI.";
+        });
+}
+
+// ==================== E. LOGIC TÀI CHÍNH: THU NHẬP & CHI TIÊU + OCR SCANNER ====================
+
+// Quản lý thay đổi Loại giao dịch (Thu nhập/Chi tiêu) để thay đổi danh mục động
+function updateCategoryDropdown(typeSelectId, categorySelectId) {
+    const typeSelect = document.getElementById(typeSelectId);
+    const catSelect = document.getElementById(categorySelectId);
+    
+    if (!typeSelect || !catSelect) return;
+    
+    const type = typeSelect.value;
+    catSelect.innerHTML = "";
+    
+    CATEGORIES[type].forEach(cat => {
+        const opt = document.createElement("option");
+        opt.value = cat;
+        opt.textContent = cat;
+        catSelect.appendChild(opt);
+    });
+}
+
+// Cài đặt bộ quét OCR ảnh chuyển khoản ngân hàng bằng Tesseract.js cục bộ
+function initOCRScanner() {
+    const dropZone = document.getElementById("ocr-drop-zone");
+    const fileInput = document.getElementById("ocr-file-input");
+    const previewContainer = document.getElementById("ocr-preview-container");
+    const previewImg = document.getElementById("ocr-preview-img");
+    const statusMsg = document.getElementById("ocr-status-message");
+    const statusText = document.getElementById("ocr-status-text");
+    const scanLine = document.getElementById("ocr-scanner-line");
+    
+    if (!dropZone || !fileInput) return;
+    
+    // Sự kiện kéo thả
+    dropZone.addEventListener("click", () => fileInput.click());
+    
+    dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.classList.add("dragover");
+    });
+    
+    dropZone.addEventListener("dragleave", () => {
+        dropZone.classList.remove("dragover");
+    });
+    
+    dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        if (e.dataTransfer.files.length > 0) {
+            handleOCRFile(e.dataTransfer.files[0]);
+        }
+    });
+    
+    fileInput.addEventListener("change", (e) => {
+        if (e.target.files.length > 0) {
+            handleOCRFile(e.target.files[0]);
+        }
+    });
+    
+    function handleOCRFile(file) {
+        if (!file.type.startsWith("image/")) {
+            alert("Vui lòng tải lên một tệp tin hình ảnh giao dịch hợp lệ.");
+            return;
+        }
+        
+        // Hiển thị Preview ảnh hóa đơn giao dịch
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            previewImg.src = e.target.result;
+            previewContainer.classList.remove("hidden");
+            scanLine.classList.remove("hidden");
+            statusMsg.classList.remove("hidden");
+            statusText.textContent = "Đang tải mô hình ngôn ngữ AI Tesseract...";
+            
+            // Bắt đầu xử lý OCR cục bộ bằng Tesseract.js
+            runTesseractOCR(file);
+        };
+        reader.readAsDataURL(file);
+    }
+    
+    function runTesseractOCR(file) {
+        Tesseract.recognize(
+            file,
+            'vie+eng', // Kết hợp bộ nhận diện Tiếng Việt và Tiếng Anh ngân hàng
+            { 
+                logger: m => {
+                    if (m.status === 'recognizing text') {
+                        statusText.textContent = `Đang đọc ảnh: ${Math.round(m.progress * 100)}%...`;
+                    }
+                } 
+            }
+        ).then(({ data: { text } }) => {
+            scanLine.classList.add("hidden");
+            statusMsg.classList.add("hidden");
+            
+            // Tiến hành phân tích văn bản hóa đơn đã trích xuất
+            parseTransactionText(text);
+        }).catch(err => {
+            scanLine.classList.add("hidden");
+            statusMsg.classList.add("hidden");
+            alert("Lỗi xử lý quét ảnh OCR: " + err.message);
+        });
+    }
+}
+
+// Hàm Regex nhận dạng các thông tin giao dịch chính của Việt Nam
+function parseTransactionText(rawText) {
+    console.log("Đã đọc văn bản OCR:", rawText);
+    
+    let detectedAmount = 0;
+    let detectedDate = new Date().toISOString().split('T')[0];
+    let detectedNotes = "Quét ảnh hóa đơn";
+    let detectedType = "expense"; // Mặc định là chi tiêu trừ phi nhận diện ra khoản cộng tiền
+    
+    // 1. Phân tích loại giao dịch (+) hay (-)
+    const cleanText = rawText.replace(/\s+/g, ' ');
+    if (cleanText.includes("+") || cleanText.toLowerCase().includes("nhan tien") || cleanText.toLowerCase().includes("cộng") || cleanText.toLowerCase().includes("thu nhap")) {
+        detectedType = "income";
+    }
+    
+    // 2. Nhận dạng Số tiền (Amount) - Tìm mẫu dạng +200.000, 200,000 VND, 50,000đ, v.v.
+    // Lấy chuỗi số dài nhất đại diện cho số tiền giao dịch
+    const moneyRegex = /(?:\+|-)?\s*\b\d{1,3}(?:[.,]\d{3})+(?:\s*(?:VND|₫|đ|d|dong))?\b/gi;
+    const matches = cleanText.match(moneyRegex);
+    
+    if (matches && matches.length > 0) {
+        // Lấy số tiền có giá trị lớn nhất trong ảnh (thường là số tiền giao dịch chính)
+        let maxVal = 0;
+        matches.forEach(match => {
+            const numericStr = match.replace(/[^\d]/g, '');
+            const parsedVal = parseInt(numericStr, 10);
+            if (parsedVal > maxVal && parsedVal < 500000000) { // Giới hạn hợp lý dưới 500 triệu tránh quét trúng số TK
+                maxVal = parsedVal;
+            }
+        });
+        if (maxVal > 0) detectedAmount = maxVal;
+    }
+    
+    // 3. Nhận dạng Ngày giao dịch (Date) - Định dạng DD/MM/YYYY, DD-MM-YYYY
+    const dateRegex = /\b\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}\b/g;
+    const dateMatches = cleanText.match(dateRegex);
+    if (dateMatches && dateMatches.length > 0) {
+        const parts = dateMatches[0].split(/[\/-]/);
+        let day = parseInt(parts[0], 10);
+        let month = parseInt(parts[1], 10);
+        let year = parts[2].length === 2 ? 2000 + parseInt(parts[2], 10) : parseInt(parts[2], 10);
+        
+        // Đảm bảo định dạng ngày hợp lệ YYYY-MM-DD
+        const formattedDay = day < 10 ? '0' + day : day;
+        const formattedMonth = month < 10 ? '0' + month : month;
+        detectedDate = `${year}-${formattedMonth}-${formattedDay}`;
+    }
+    
+    // 4. Nhận dạng Nội dung/Ghi chú
+    // Tìm các từ khóa ngân hàng phổ biến
+    const contentKeywords = ["nội dung", "nd chuyển khoản", "lời nhắn", "nội dung chuyển", "nd", "message", "mo ta"];
+    let foundNotes = "";
+    
+    contentKeywords.forEach(keyword => {
+        const index = rawText.toLowerCase().indexOf(keyword);
+        if (index !== -1 && !foundNotes) {
+            // Lấy dòng chứa từ khóa và dòng kế tiếp
+            const rest = rawText.substring(index + keyword.length).trim();
+            const lines = rest.split('\n');
+            if (lines.length > 0) {
+                foundNotes = lines[0].replace(/[:\-]/g, '').trim();
+                // Lấy thêm dòng tiếp theo nếu dòng hiện tại quá ngắn
+                if (foundNotes.length < 5 && lines.length > 1) {
+                    foundNotes += " " + lines[1].trim();
+                }
+            }
+        }
+    });
+    
+    if (foundNotes) detectedNotes = foundNotes;
+    
+    // 5. Tự động điền dữ liệu đã nhận dạng vào Biểu mẫu và tạo hiệu ứng Glow nổi bật
+    document.getElementById("trans-type").value = detectedType;
+    updateCategoryDropdown("trans-type", "trans-category");
+    
+    document.getElementById("trans-date").value = detectedDate;
+    document.getElementById("trans-amount").value = detectedAmount;
+    document.getElementById("trans-notes").value = `[AI OCR Quét Hóa Đơn] ${detectedNotes}`;
+    
+    // Hiệu ứng phát sáng các ô nhập liệu được auto-fill thành công
+    const highlightInputs = [
+        document.getElementById("trans-type"),
+        document.getElementById("trans-date"),
+        document.getElementById("trans-amount"),
+        document.getElementById("trans-notes")
+    ];
+    
+    highlightInputs.forEach(el => {
+        el.style.borderColor = "var(--color-emerald)";
+        el.style.boxShadow = "0 0 15px var(--color-emerald-glow)";
+        setTimeout(() => {
+            el.style.borderColor = "";
+            el.style.boxShadow = "";
+        }, 3000);
+    });
+    
+    alert(`Quét ảnh thành công!\n- Số tiền nhận diện: ${detectedAmount.toLocaleString('vi-VN')} ₫\n- Ngày: ${detectedDate}\n- Ghi chú: ${detectedNotes}`);
+}
+
+// Thêm hoặc cập nhật Giao dịch
+function handleSaveTransaction(e) {
+    e.preventDefault();
+    
+    const id = document.getElementById("trans-id").value;
+    const type = document.getElementById("trans-type").value;
+    const date = document.getElementById("trans-date").value;
+    const amount = parseFloat(document.getElementById("trans-amount").value);
+    const category = document.getElementById("trans-category").value;
+    const notes = document.getElementById("trans-notes").value.trim();
+    
+    if (isNaN(amount) || amount <= 0) {
+        alert("Số tiền giao dịch phải lớn hơn 0 ₫.");
+        return;
+    }
+    
+    const newTrans = {
+        id: id || "trans-" + Date.now(),
+        type,
+        date,
+        amount,
+        category,
+        notes
+    };
+    
+    if (id) {
+        // Cập nhật giao dịch cũ
+        const idx = appState.transactions.findIndex(t => t.id === id);
+        if (idx !== -1) appState.transactions[idx] = newTrans;
+    } else {
+        // Thêm giao dịch mới
+        appState.transactions.push(newTrans);
+    }
+    
+    saveStateToLocalStorage();
+    triggerAutoSync(); // Đồng bộ tự động ngầm nếu có cài đặt Sheets
+    
+    // Reset Form & làm mới danh sách hiển thị
+    document.getElementById("transaction-form").reset();
+    document.getElementById("trans-id").value = "";
+    document.getElementById("ocr-preview-container").classList.add("hidden");
+    document.getElementById("ocr-file-input").value = "";
+    
+    updateCategoryDropdown("trans-type", "trans-category");
+    renderAllViews();
+    alert("Lưu giao dịch thành công!");
+}
+
+// Xóa giao dịch
+function handleDeleteTransaction(id) {
+    if (confirm("Bạn có chắc chắn muốn xóa giao dịch này không?")) {
+        appState.transactions = appState.transactions.filter(t => t.id !== id);
+        saveStateToLocalStorage();
+        triggerAutoSync();
+        renderAllViews();
+    }
+}
+
+// Sửa giao dịch (Nạp dữ liệu lên Form để chỉnh sửa)
+function handleEditTransaction(id) {
+    const trans = appState.transactions.find(t => t.id === id);
+    if (!trans) return;
+    
+    document.getElementById("trans-id").value = trans.id;
+    document.getElementById("trans-type").value = trans.type;
+    updateCategoryDropdown("trans-type", "trans-category");
+    
+    document.getElementById("trans-date").value = trans.date;
+    document.getElementById("trans-amount").value = trans.amount;
+    document.getElementById("trans-category").value = trans.category;
+    document.getElementById("trans-notes").value = trans.notes;
+    
+    // Cuộn màn hình lên khu vực form (cho giao diện di động)
+    document.getElementById("transaction-form").scrollIntoView({ behavior: 'smooth' });
+}
+
+// ==================== F. LOGIC QUẢN LÝ KHOẢN NỢ VÀ THANH TOÁN ĐỢT ====================
+
+function handleSaveDebt(e) {
+    e.preventDefault();
+    
+    const id = document.getElementById("debt-id").value;
+    const creditor = document.getElementById("debt-creditor").value.trim();
+    const type = document.getElementById("debt-type").value;
+    const interestRate = parseFloat(document.getElementById("debt-interest").value) || 0;
+    const amount = parseFloat(document.getElementById("debt-amount").value);
+    const dueDate = document.getElementById("debt-due-date").value;
+    const status = document.getElementById("debt-status").value;
+    
+    const oldDebt = appState.debts.find(d => d.id === id);
+    const repayments = oldDebt ? oldDebt.repayments : [];
+    
+    const newDebt = {
+        id: id || "debt-" + Date.now(),
+        creditor,
+        amount,
+        type,
+        interestRate,
+        dueDate,
+        status,
+        repayments
+    };
+    
+    if (id) {
+        const idx = appState.debts.findIndex(d => d.id === id);
+        if (idx !== -1) appState.debts[idx] = newDebt;
+    } else {
+        appState.debts.push(newDebt);
+    }
+    
+    saveStateToLocalStorage();
+    triggerAutoSync();
+    closeModal("modal-debt");
+    renderAllViews();
+}
+
+function handleDeleteDebt(id) {
+    if (confirm("Xóa khoản nợ này sẽ xóa toàn bộ nhật ký thanh toán đợt kèm theo. Bạn có chắc không?")) {
+        appState.debts = appState.debts.filter(d => d.id !== id);
+        saveStateToLocalStorage();
+        triggerAutoSync();
+        renderAllViews();
+    }
+}
+
+// Mở form nhập Repayment đợt trả nợ
+function openRepaymentModal(debtId) {
+    const debt = appState.debts.find(d => d.id === debtId);
+    if (!debt) return;
+    
+    document.getElementById("repayment-debt-id").value = debt.id;
+    
+    // Tính tổng đã trả trước đó để hiển thị
+    const totalPaid = debt.repayments.reduce((sum, r) => sum + r.amount, 0);
+    const remaining = debt.amount - totalPaid;
+    
+    document.getElementById("repayment-debt-summary").innerHTML = `
+        <strong>Chủ nợ:</strong> ${debt.creditor}<br>
+        <strong>Dư nợ gốc:</strong> ${debt.amount.toLocaleString('vi-VN')} ₫<br>
+        <strong>Đã trả:</strong> ${totalPaid.toLocaleString('vi-VN')} ₫<br>
+        <strong>Còn lại:</strong> <span style="color: var(--color-coral); font-weight: bold;">${remaining.toLocaleString('vi-VN')} ₫</span>
+    `;
+    
+    document.getElementById("repayment-amount").value = remaining;
+    document.getElementById("repayment-date").value = new Date().toISOString().split('T')[0];
+    
+    openModal("modal-repayment");
+}
+
+// Ghi nhận đợt thanh toán nợ
+function handleSaveRepayment(e) {
+    e.preventDefault();
+    
+    const debtId = document.getElementById("repayment-debt-id").value;
+    const amount = parseFloat(document.getElementById("repayment-amount").value);
+    const date = document.getElementById("repayment-date").value;
+    const autoTrans = document.getElementById("repayment-auto-transaction").checked;
+    
+    const debtIdx = appState.debts.findIndex(d => d.id === debtId);
+    if (debtIdx === -1) return;
+    
+    const debt = appState.debts[debtIdx];
+    const totalPaid = debt.repayments.reduce((sum, r) => sum + r.amount, 0);
+    const remaining = debt.amount - totalPaid;
+    
+    if (amount <= 0 || amount > remaining) {
+        alert(`Số tiền trả đợt này phải lớn hơn 0 và không vượt quá số nợ còn lại (${remaining.toLocaleString('vi-VN')} ₫).`);
+        return;
+    }
+    
+    // 1. Thêm đợt thanh toán nợ vào nhật ký
+    const repObj = {
+        id: "rep-" + Date.now(),
+        amount,
+        date
+    };
+    debt.repayments.push(repObj);
+    
+    // Cập nhật trạng thái tự động nếu đã trả hết
+    const newTotalPaid = totalPaid + amount;
+    if (newTotalPaid >= debt.amount) {
+        debt.status = "paid";
+    }
+    
+    // 2. Tự động ghi chép khoản thu chi tương ứng nếu người dùng đánh dấu
+    if (autoTrans) {
+        const transObj = {
+            id: "trans-" + Date.now(),
+            type: debt.type === "owe_others" ? "expense" : "income", // Nợ người khác thì trả nợ là Chi tiêu. Người ta nợ mình thì họ trả là Thu nhập.
+            date,
+            amount,
+            category: "Trả khoản nợ",
+            notes: `[Tự động trả nợ] Thanh toán đợt cho ${debt.creditor}`
+        };
+        appState.transactions.push(transObj);
+    }
+    
+    saveStateToLocalStorage();
+    triggerAutoSync();
+    closeModal("modal-repayment");
+    renderAllViews();
+    alert("Cập nhật thanh toán đợt thành công!");
+}
+
+// ==================== G. LOGIC KẾ HOẠCH & MỤC TIÊU (FUTURE GOALS) ====================
+
+function handleSaveGoal(e) {
+    e.preventDefault();
+    
+    const id = document.getElementById("goal-id").value;
+    const title = document.getElementById("goal-title").value.trim();
+    const timeframe = document.getElementById("goal-timeframe").value;
+    const dueDate = document.getElementById("goal-due-date").value;
+    const targetAmount = parseFloat(document.getElementById("goal-target-amount").value) || 0;
+    const currentAmount = parseFloat(document.getElementById("goal-current-amount").value) || 0;
+    const milestonesStr = document.getElementById("goal-milestones-input").value.trim();
+    
+    // Xử lý chuyển chuỗi milestones phân tách bằng dấu phẩy thành mảng object
+    let milestones = [];
+    if (milestonesStr) {
+        milestones = milestonesStr.split(',').map(m => m.trim()).filter(m => m !== "").map((m, idx) => {
+            return { id: `ms-${idx}-${Date.now()}`, title: m, completed: false };
+        });
+    }
+    
+    // Giữ lại trạng thái milestones cũ nếu đang chỉnh sửa kế hoạch
+    const oldGoal = appState.goals.find(g => g.id === id);
+    if (oldGoal && oldGoal.milestones.length > 0 && !milestonesStr) {
+        milestones = oldGoal.milestones;
+    }
+    
+    const newGoal = {
+        id: id || "goal-" + Date.now(),
+        title,
+        timeframe,
+        dueDate,
+        targetAmount,
+        currentAmount,
+        milestones
+    };
+    
+    if (id) {
+        const idx = appState.goals.findIndex(g => g.id === id);
+        if (idx !== -1) appState.goals[idx] = newGoal;
+    } else {
+        appState.goals.push(newGoal);
+    }
+    
+    saveStateToLocalStorage();
+    triggerAutoSync();
+    closeModal("modal-goal");
+    renderAllViews();
+}
+
+function handleDeleteGoal(id) {
+    if (confirm("Bạn có muốn xóa mục tiêu kế hoạch này không?")) {
+        appState.goals = appState.goals.filter(g => g.id !== id);
+        saveStateToLocalStorage();
+        triggerAutoSync();
+        renderAllViews();
+    }
+}
+
+// Cập nhật trạng thái hoàn thành mốc (Milestone) trực tiếp trên Card của Kế hoạch
+function toggleMilestone(goalId, milestoneId) {
+    const goalIdx = appState.goals.findIndex(g => g.id === goalId);
+    if (goalIdx === -1) return;
+    
+    const goal = appState.goals[goalIdx];
+    const msIdx = goal.milestones.findIndex(m => m.id === milestoneId);
+    if (msIdx === -1) return;
+    
+    goal.milestones[msIdx].completed = !goal.milestones[msIdx].completed;
+    
+    saveStateToLocalStorage();
+    triggerAutoSync();
+    renderAllViews();
+}
+
+// ==================== H. LOGIC WORKSPACE: KANBAN BOARD + GHI CHÚ ====================
+
+// --- 1. KANBAN LOGIC ---
+function handleSaveTask(e) {
+    e.preventDefault();
+    
+    const id = document.getElementById("task-id").value;
+    const title = document.getElementById("task-title").value.trim();
+    const description = document.getElementById("task-desc").value.trim();
+    const status = document.getElementById("task-status").value;
+    const priority = document.getElementById("task-priority").value;
+    const dueDate = document.getElementById("task-due-date").value;
+    
+    const newTask = {
+        id: id || "task-" + Date.now(),
+        title,
+        description,
+        status,
+        priority,
+        dueDate
+    };
+    
+    if (id) {
+        const idx = appState.tasks.findIndex(t => t.id === id);
+        if (idx !== -1) appState.tasks[idx] = newTask;
+    } else {
+        appState.tasks.push(newTask);
+    }
+    
+    saveStateToLocalStorage();
+    triggerAutoSync();
+    closeModal("modal-task");
+    renderAllViews();
+}
+
+function handleDeleteTask(id) {
+    if (confirm("Bạn có chắc chắn muốn xóa nhiệm vụ này không?")) {
+        appState.tasks = appState.tasks.filter(t => t.id !== id);
+        saveStateToLocalStorage();
+        triggerAutoSync();
+        renderAllViews();
+    }
+}
+
+// Các hàm kéo thả HTML5 Drag and Drop Kanban
+function allowDrop(ev) {
+    ev.preventDefault();
+}
+
+function dragTask(ev, taskId) {
+    ev.dataTransfer.setData("text", taskId);
+}
+
+function dropTask(ev, destStatus) {
+    ev.preventDefault();
+    const taskId = ev.dataTransfer.getData("text");
+    
+    const taskIdx = appState.tasks.findIndex(t => t.id === taskId);
+    if (taskIdx !== -1) {
+        appState.tasks[taskIdx].status = destStatus;
+        saveStateToLocalStorage();
+        triggerAutoSync();
+        renderAllViews();
+    }
+}
+
+// --- 2. GHI CHÚ LOGIC ---
+function handleSaveNote(e) {
+    e.preventDefault();
+    
+    const id = document.getElementById("note-id").value;
+    const title = document.getElementById("note-title").value.trim();
+    const content = document.getElementById("note-content").value.trim();
+    
+    const newNote = {
+        id: id || "note-" + Date.now(),
+        title,
+        content,
+        createdAt: new Date().toLocaleDateString('vi-VN') + " " + new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})
+    };
+    
+    if (id) {
+        const idx = appState.notes.findIndex(n => n.id === id);
+        if (idx !== -1) appState.notes[idx] = newNote;
+    } else {
+        appState.notes.push(newNote);
+    }
+    
+    saveStateToLocalStorage();
+    triggerAutoSync();
+    
+    // Reset Form
+    document.getElementById("note-form").reset();
+    document.getElementById("note-id").value = "";
+    document.getElementById("note-form-title").textContent = "Tạo ghi chú mới";
+    
+    renderAllViews();
+    alert("Lưu sổ tay ghi chú thành công!");
+}
+
+function handleDeleteNote(id) {
+    if (confirm("Bạn có chắc muốn xóa ghi chú này không?")) {
+        appState.notes = appState.notes.filter(n => n.id !== id);
+        saveStateToLocalStorage();
+        triggerAutoSync();
+        renderAllViews();
+    }
+}
+
+function handleEditNote(id) {
+    const note = appState.notes.find(n => n.id === id);
+    if (!note) return;
+    
+    document.getElementById("note-id").value = note.id;
+    document.getElementById("note-title").value = note.title;
+    document.getElementById("note-content").value = note.content;
+    document.getElementById("note-form-title").textContent = "Chỉnh sửa ghi chú";
+}
+
+// Sao chép một ghi chú nhanh cho NotebookLM
+function copyNoteForNotebookLM(id) {
+    const note = appState.notes.find(n => n.id === id);
+    if (!note) return;
+    
+    const formatted = `=== TÀI LIỆU GHI CHÚ CÁ NHÂN ===\nTiêu đề: ${note.title}\nNgày tạo: ${note.createdAt}\nNội dung chi tiết:\n${note.content}\n=================================`;
+    
+    navigator.clipboard.writeText(formatted).then(() => {
+        alert("Đã sao chép nội dung ghi chú chuẩn cấu trúc vào Clipboard! Giờ bạn chỉ cần nhấn Ctrl+V (Dán) vào NotebookLM.");
+    }).catch(err => {
+        alert("Lỗi sao chép Clipboard: " + err.message);
+    });
+}
+
+// --- 3. NOTEBOOKLM HUB PANEL & EXPORTER ---
+// Hàm biên tập toàn bộ dữ liệu hệ thống ra tệp Markdown chuẩn hóa cao cấp gửi NotebookLM
+function exportAllDataToNotebookLM() {
+    let md = `# BÁO CÁO CƠ SỞ DỮ LIỆU CỦA PERSONAL HUB\n`;
+    md += `Xuất bản lúc: ${new Date().toLocaleDateString('vi-VN')} ${new Date().toLocaleTimeString('vi-VN')}\n\n`;
+    
+    // Thống kê tài sản ròng
+    const incomeTotal = appState.transactions.filter(t => t.type === "income").reduce((sum, t) => sum + t.amount, 0);
+    const expenseTotal = appState.transactions.filter(t => t.type === "expense").reduce((sum, t) => sum + t.amount, 0);
+    const totalDebt = appState.debts.filter(d => d.status !== "paid" && d.type === "owe_others").reduce((sum, d) => {
+        const paid = d.repayments.reduce((s, r) => s + r.amount, 0);
+        return sum + (d.amount - paid);
+    }, 0);
+    const totalReceivable = appState.debts.filter(d => d.status !== "paid" && d.type === "others_owe").reduce((sum, d) => {
+        const paid = d.repayments.reduce((s, r) => s + r.amount, 0);
+        return sum + (d.amount - paid);
+    }, 0);
+    const netWorth = incomeTotal - expenseTotal - totalDebt + totalReceivable;
+    
+    md += `## 1. TỔNG QUAN TÀI CHÍNH CÁ NHÂN\n`;
+    md += `- Tài sản ròng (Ước tính): ${netWorth.toLocaleString('vi-VN')} VND\n`;
+    md += `- Tổng thu nhập đã ghi nhận: ${incomeTotal.toLocaleString('vi-VN')} VND\n`;
+    md += `- Tổng chi tiêu đã ghi nhận: ${expenseTotal.toLocaleString('vi-VN')} VND\n`;
+    md += `- Tổng dư nợ phải trả (Chưa trả xong): ${totalDebt.toLocaleString('vi-VN')} VND\n`;
+    md += `- Tổng khoản cho vay (Chưa thu hồi xong): ${totalReceivable.toLocaleString('vi-VN')} VND\n\n`;
+    
+    // Chi tiết Khoản nợ
+    md += `## 2. CHI TIẾT CÁC KHOẢN NỢ\n`;
+    if (appState.debts.length === 0) {
+        md += `Không có khoản nợ nào được ghi nhận.\n\n`;
+    } else {
+        appState.debts.forEach((d, idx) => {
+            const paid = d.repayments.reduce((s, r) => s + r.amount, 0);
+            md += `### Khoản nợ ${idx + 1}: ${d.creditor}\n`;
+            md += `- Loại: ${d.type === "owe_others" ? "Tôi nợ họ (Phải trả)" : "Họ nợ tôi (Cho vay)"}\n`;
+            md += `- Số tiền gốc: ${d.amount.toLocaleString('vi-VN')} VND\n`;
+            md += `- Đã thanh toán: ${paid.toLocaleString('vi-VN')} VND (${Math.round((paid / d.amount) * 100)}%)\n`;
+            md += `- Còn lại: ${(d.amount - paid).toLocaleString('vi-VN')} VND\n`;
+            md += `- Hạn thanh toán: ${d.dueDate}\n`;
+            md += `- Trạng thái: ${d.status === "active" ? "Đang hoạt động" : d.status === "paid" ? "Đã trả xong" : "Đã trễ hạn"}\n\n`;
+        });
+    }
+    
+    // Kế hoạch tương lai
+    md += `## 3. KẾ HOẠCH VÀ MỤC TIÊU TƯƠNG LAI\n`;
+    if (appState.goals.length === 0) {
+        md += `Chưa có kế hoạch tương lai nào được lập.\n\n`;
+    } else {
+        appState.goals.forEach((g, idx) => {
+            let progress = 0;
+            if (g.targetAmount > 0) {
+                progress = Math.round((g.currentAmount / g.targetAmount) * 100);
+            } else if (g.milestones.length > 0) {
+                const comp = g.milestones.filter(m => m.completed).length;
+                progress = Math.round((comp / g.milestones.length) * 100);
+            }
+            md += `### Mục tiêu ${idx + 1}: ${g.title}\n`;
+            md += `- Thời hạn: ${g.timeframe === "short" ? "Ngắn hạn (<1 năm)" : g.timeframe === "medium" ? "Trung hạn (1-3 năm)" : "Dài hạn (>3 năm)"}\n`;
+            md += `- Hạn đạt: ${g.dueDate}\n`;
+            if (g.targetAmount > 0) {
+                md += `- Ngân sách dự kiến: ${g.targetAmount.toLocaleString('vi-VN')} VND\n`;
+                md += `- Đã tiết kiệm tích lũy: ${g.currentAmount.toLocaleString('vi-VN')} VND\n`;
+            }
+            md += `- Tiến độ hoàn thành: ${progress}%\n`;
+            if (g.milestones.length > 0) {
+                md += `- Các mốc quan trọng (Milestones):\n`;
+                g.milestones.forEach(m => {
+                    md += `  - [${m.completed ? 'x' : ' '}] ${m.title}\n`;
+                });
+            }
+            md += `\n`;
+        });
+    }
+    
+    // Bảng Kanban Công việc
+    md += `## 4. QUẢN LÝ CÔNG VIỆC (KANBAN BOARD)\n`;
+    const statuses = { todo: "Cần làm", inprogress: "Đang làm", review: "Đang kiểm tra", done: "Đã xong" };
+    Object.keys(statuses).forEach(stat => {
+        const list = appState.tasks.filter(t => t.status === stat);
+        md += `### Trạng thái: ${statuses[stat]} (${list.length} nhiệm vụ)\n`;
+        if (list.length === 0) {
+            md += `Không có nhiệm vụ nào.\n`;
+        } else {
+            list.forEach(t => {
+                md += `- **${t.title}** [Ưu tiên: ${t.priority.toUpperCase()}] (Hạn chót: ${t.dueDate})\n`;
+                if (t.description) md += `  *Mô tả:* ${t.description}\n`;
+            });
+        }
+        md += `\n`;
+    });
+    
+    // Các ghi chú trong sổ tay
+    md += `## 5. SỔ TAY GHI CHÚ CÁ NHÂN & Ý TƯỞNG\n`;
+    if (appState.notes.length === 0) {
+        md += `Sổ tay hiện đang trống.\n\n`;
+    } else {
+        appState.notes.forEach((n, idx) => {
+            md += `### Ghi chú ${idx + 1}: ${n.title} (Ngày viết: ${n.createdAt})\n`;
+            md += `${n.content}\n\n`;
+        });
+    }
+    
+    navigator.clipboard.writeText(md).then(() => {
+        alert("Đã kết xuất và sao chép toàn bộ dữ liệu Personal Hub của bạn dưới dạng văn bản cấu trúc AI AI-Markdown vào Clipboard!\n\nBây giờ bạn chỉ cần mở NotebookLM lên và dán (Ctrl+V) làm nguồn tài liệu để bắt đầu hỏi đáp trợ lý AI nhé.");
+    }).catch(err => {
+        alert("Lỗi kết xuất dữ liệu: " + err.message);
+    });
+}
+
+// --- 4. KHO LƯU TRỮ TÀI LIỆU GIẢ LẬP & MẸO HAY ---
+// Mô phỏng lưu trữ file bằng cách kéo thả và lưu metadata vào State
+function initVirtualStorage() {
+    const dropZone = document.getElementById("storage-drop-zone");
+    const fileInput = document.getElementById("storage-file-input");
+    
+    if (!dropZone || !fileInput) return;
+    
+    dropZone.addEventListener("click", () => fileInput.click());
+    
+    dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.classList.add("dragover");
+    });
+    
+    dropZone.addEventListener("dragleave", () => {
+        dropZone.classList.remove("dragover");
+    });
+    
+    dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        if (e.dataTransfer.files.length > 0) {
+            handleUploadFiles(e.dataTransfer.files);
+        }
+    });
+    
+    fileInput.addEventListener("change", (e) => {
+        if (e.target.files.length > 0) {
+            handleUploadFiles(e.target.files);
+        }
+    });
+    
+    function handleUploadFiles(files) {
+        for (let i = 0; i < files.length; i++) {
+            const f = files[i];
+            
+            const fileMeta = {
+                id: "file-" + Date.now() + "-" + i,
+                name: f.name,
+                type: f.type || "application/octet-stream",
+                size: formatBytes(f.size),
+                uploadedAt: new Date().toLocaleDateString('vi-VN')
+            };
+            
+            appState.storageFiles.push(fileMeta);
+        }
+        
+        saveStateToLocalStorage();
+        triggerAutoSync();
+        renderAllViews();
+        alert("Đã tải lên và lập chỉ mục lưu trữ thành công các tệp tài liệu cá nhân!");
+    }
+}
+
+// Xóa tệp tin khỏi kho lưu trữ
+function handleDeleteStorageFile(id) {
+    if (confirm("Bạn có muốn xóa tài liệu này khỏi kho lưu trữ?")) {
+        appState.storageFiles = appState.storageFiles.filter(f => f.id !== id);
+        saveStateToLocalStorage();
+        triggerAutoSync();
+        renderAllViews();
+    }
+}
+
+// Bổ trợ format dung lượng byte
+function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+// Quản lý ghim mẹo lưu trữ
+function togglePinTip(tipId) {
+    const tips = JSON.parse(localStorage.getItem("pmh_storage_tips")) || INITIAL_STORAGE_TIPS;
+    const idx = tips.findIndex(t => t.id === tipId);
+    if (idx !== -1) {
+        tips[idx].pinned = !tips[idx].pinned;
+        localStorage.setItem("pmh_storage_tips", JSON.stringify(tips));
+        renderStorageTips();
+    }
+}
+
+// ==================== I. ĐỒNG BỘ ĐÁM MÂY GOOGLE SHEETS VIA APPS SCRIPT WEB APP ====================
+
+// Đọc cài đặt cấu hình trong Settings và lưu lại
+function handleSaveSettings() {
+    const webAppUrl = document.getElementById("settings-web-app-url").value.trim();
+    const syncToken = document.getElementById("settings-sync-token").value.trim();
+    
+    if (webAppUrl && !webAppUrl.startsWith("https://script.google.com/macros/s/")) {
+        alert("Đường dẫn Google Apps Script Web App của bạn không hợp lệ. URL phải có dạng đầu: https://script.google.com/macros/s/...");
+        return;
+    }
+    
+    appState.settings.webAppUrl = webAppUrl;
+    appState.settings.syncToken = syncToken;
+    
+    saveStateToLocalStorage();
+    
+    alert("Đã cấu hình thông số kết nối đám mây!");
+    
+    if (webAppUrl) {
+        // Thực hiện đồng bộ hóa toàn diện ngay sau khi lưu
+        syncAllDataToGoogleSheets();
+    }
+}
+
+// Kiểm tra kết nối API
+function testGoogleSheetsConnection(alertSuccess = true) {
+    const webAppUrl = appState.settings.webAppUrl || document.getElementById("settings-web-app-url").value.trim();
+    const syncToken = appState.settings.syncToken || document.getElementById("settings-sync-token").value.trim();
+    const indicator = document.getElementById("sync-indicator");
+    
+    if (!webAppUrl) {
+        if (alertSuccess) alert("Bạn cần điền URL Apps Script Web App trước khi kiểm tra kết nối.");
+        return;
+    }
+    
+    // Thiết lập trạng thái đang kiểm tra
+    if (indicator) {
+        indicator.className = "sync-status-badge syncing";
+        indicator.querySelector(".status-text").textContent = "Đang kiểm tra...";
+    }
+    
+    const testUrl = `${webAppUrl}?token=${encodeURIComponent(syncToken)}`;
+    
+    fetch(testUrl, { method: "GET", mode: "cors" })
+        .then(res => res.json())
+        .then(resData => {
+            if (resData.success) {
+                if (indicator) {
+                    indicator.className = "sync-status-badge online";
+                    indicator.querySelector(".status-text").textContent = "Sheets (Đã kết nối)";
+                }
+                if (alertSuccess) alert("Chúc mừng! Kết nối với cơ sở dữ liệu Google Sheet của bạn hoạt động hoàn hảo.");
+            } else {
+                throw new Error(resData.error || "Token bảo mật không chính xác.");
+            }
+        })
+        .catch(err => {
+            if (indicator) {
+                indicator.className = "sync-status-badge offline";
+                indicator.querySelector(".status-text").textContent = "Lỗi kết nối";
+            }
+            alert(`Lỗi kết nối Google Sheets: ${err.message}\nHãy kiểm tra lại URL Web App và biến SECURITY_TOKEN đã khớp chưa.`);
+        });
+}
+
+// Đồng bộ đẩy dữ liệu lên Google Sheets (POST)
+function syncAllDataToGoogleSheets() {
+    const webAppUrl = appState.settings.webAppUrl;
+    const syncToken = appState.settings.syncToken;
+    const indicator = document.getElementById("sync-indicator");
+    
+    if (!webAppUrl) return;
+    
+    if (indicator) {
+        indicator.className = "sync-status-badge syncing";
+        indicator.querySelector(".status-text").textContent = "Đang đồng bộ...";
+    }
+    
+    // Chuẩn bị payload tương ứng cấu trúc các sheets trong Apps Script
+    // Đảm bảo viết đúng cấu trúc SCHEMA của Sheets
+    const payload = {
+        token: syncToken,
+        data: {
+            "Thu_Nhap": appState.transactions.map(t => {
+                return { "ID": t.id, "Amount": t.amount, "Category": t.category, "Date": t.date, "Notes": t.notes, "Type": t.type };
+            }),
+            "Khoan_No": appState.debts.map(d => {
+                return { 
+                    "ID": d.id, "Creditor": d.creditor, "Amount": d.amount, "Type": d.type, 
+                    "InterestRate": d.interestRate, "DueDate": d.dueDate, "Status": d.status,
+                    "Repayments": JSON.stringify(d.repayments) // Stringify mảng con
+                };
+            }),
+            "Ke_Hoach": appState.goals.map(g => {
+                return { 
+                    "ID": g.id, "Title": g.title, "TargetAmount": g.targetAmount, "CurrentAmount": g.currentAmount, 
+                    "DueDate": g.dueDate, "Timeframe": g.timeframe, 
+                    "Milestones": JSON.stringify(g.milestones) // Stringify mảng con
+                };
+            }),
+            "Cong_Viec": appState.tasks.map(t => {
+                return { "ID": t.id, "Title": t.title, "Description": t.description, "Status": t.status, "DueDate": t.dueDate, "Priority": t.priority };
+            }),
+            "Ghi_Chu": appState.notes.map(n => {
+                return { "ID": n.id, "Title": n.title, "Content": n.content, "CreatedAt": n.createdAt };
+            }),
+            "Tep_Tin": appState.storageFiles.map(f => {
+                return { "ID": f.id, "Name": f.name, "Type": f.type, "Size": f.size, "UploadedAt": f.uploadedAt };
+            })
+        }
+    };
+    
+    fetch(webAppUrl, {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(resData => {
+        if (resData.success) {
+            if (indicator) {
+                indicator.className = "sync-status-badge online";
+                indicator.querySelector(".status-text").textContent = "Đã đồng bộ";
+            }
+            console.log("Đồng bộ dữ liệu lên Google Sheets hoàn thành!");
+        } else {
+            throw new Error(resData.error);
+        }
+    })
+    .catch(err => {
+        if (indicator) {
+            indicator.className = "sync-status-badge offline";
+            indicator.querySelector(".status-text").textContent = "Đồng bộ lỗi";
+        }
+        console.error("Đồng bộ Google Sheets thất bại:", err);
+    });
+}
+
+// Đồng bộ kéo dữ liệu từ Google Sheets về (GET)
+function pullAllDataFromGoogleSheets() {
+    const webAppUrl = appState.settings.webAppUrl;
+    const syncToken = appState.settings.syncToken;
+    const indicator = document.getElementById("sync-indicator");
+    
+    if (!webAppUrl) return;
+    
+    if (indicator) {
+        indicator.className = "sync-status-badge syncing";
+        indicator.querySelector(".status-text").textContent = "Đang tải dữ liệu...";
+    }
+    
+    const requestUrl = `${webAppUrl}?token=${encodeURIComponent(syncToken)}`;
+    
+    fetch(requestUrl, { method: "GET", mode: "cors" })
+    .then(res => res.json())
+    .then(resData => {
+        if (resData.success && resData.data) {
+            const sheetsData = resData.data;
+            
+            // Biên dịch ngược dữ liệu từ Sheets sang State trong Local
+            if (sheetsData.Thu_Nhap) {
+                appState.transactions = sheetsData.Thu_Nhap.map(t => {
+                    return { id: t.id, amount: parseFloat(t.amount) || 0, category: t.category, date: t.date, notes: t.notes, type: t.type };
+                });
+            }
+            if (sheetsData.Khoan_No) {
+                appState.debts = sheetsData.Khoan_No.map(d => {
+                    let reps = [];
+                    try { if (d.repayments) reps = JSON.parse(d.repayments); } catch(e){}
+                    return { 
+                        id: d.id, creditor: d.creditor, amount: parseFloat(d.amount) || 0, type: d.type, 
+                        interestRate: parseFloat(d.interestrate) || 0, dueDate: d.duedate, status: d.status,
+                        repayments: reps
+                    };
+                });
+            }
+            if (sheetsData.Ke_Hoach) {
+                appState.goals = sheetsData.Ke_Hoach.map(g => {
+                    let ms = [];
+                    try { if (g.milestones) ms = JSON.parse(g.milestones); } catch(e){}
+                    return {
+                        id: g.id, title: g.title, targetAmount: parseFloat(g.targetamount) || 0, currentAmount: parseFloat(g.currentamount) || 0,
+                        dueDate: g.duedate, timeframe: g.timeframe, milestones: ms
+                    };
+                });
+            }
+            if (sheetsData.Cong_Viec) {
+                appState.tasks = sheetsData.Cong_Viec.map(t => {
+                    return { id: t.id, title: t.title, description: t.description, status: t.status, dueDate: t.duedate, priority: t.priority };
+                });
+            }
+            if (sheetsData.Ghi_Chu) {
+                appState.notes = sheetsData.Ghi_Chu.map(n => {
+                    return { id: n.id, title: n.title, content: n.content, createdAt: n.createdat };
+                });
+            }
+            if (sheetsData.Tep_Tin) {
+                appState.storageFiles = sheetsData.Tep_Tin.map(f => {
+                    return { id: f.id, name: f.name, type: f.type, size: f.size, uploadedAt: f.uploadedat };
+                });
+            }
+            
+            saveStateToLocalStorage();
+            renderAllViews();
+            
+            if (indicator) {
+                indicator.className = "sync-status-badge online";
+                indicator.querySelector(".status-text").textContent = "Google Sheets";
+            }
+            alert("Đã tải và cập nhật toàn bộ dữ liệu mới nhất từ Google Sheets thành công!");
+        } else {
+            throw new Error(resData.error || "Không lấy được dữ liệu.");
+        }
+    })
+    .catch(err => {
+        if (indicator) {
+            indicator.className = "sync-status-badge offline";
+            indicator.querySelector(".status-text").textContent = "Lỗi tải về";
+        }
+        alert("Lỗi đồng bộ tải dữ liệu từ Sheets: " + err.message);
+    });
+}
+
+// Đồng bộ tự động sau khi sửa dữ liệu (gọi ngầm không làm phiền người dùng)
+function triggerAutoSync() {
+    if (appState.settings && appState.settings.webAppUrl) {
+        syncAllDataToGoogleSheets();
+    }
+}
+
+// ==================== J. KẾT XUẤT SAO LƯU & XÓA CỤC BỘ DỮ LIỆU CÀI ĐẶT ====================
+function exportLocalDataBackup() {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appState, null, 4));
+    const dlAnchorElem = document.createElement('a');
+    dlAnchorElem.setAttribute("href", dataStr);
+    dlAnchorElem.setAttribute("download", `personal_hub_backup_${new Date().toISOString().split('T')[0]}.json`);
+    dlAnchorElem.click();
+}
+
+function clearAllHubData() {
+    if (confirm("CẢNH BÁO CỰC KỲ NGUY HIỂM!\n\nHành động này sẽ xóa toàn bộ mật khẩu, dữ liệu tài chính, công việc lưu cục bộ trên trình duyệt của bạn.\n\nBạn có thực sự chắc chắn không?")) {
+        localStorage.removeItem("pmh_encrypted_key_test");
+        localStorage.removeItem("pmh_encrypted_state_data");
+        localStorage.removeItem("pmh_storage_tips");
+        alert("Đã xóa sạch dữ liệu! Trang web sẽ tự động khóa và tải lại để bạn khởi tạo mật khẩu mới.");
+        window.location.reload();
+    }
+}
+
+function handlePasswordChange() {
+    const newPass = document.getElementById("settings-change-password").value.trim();
+    if (!newPass || newPass.length < 4) {
+        alert("Mật khẩu mới phải có tối thiểu 4 ký tự.");
+        return;
+    }
+    
+    try {
+        derivedKey = CryptoJS.SHA256(newPass).toString();
+        const testPayload = "encryption-authorized-key";
+        const encryptededTest = CryptoJS.AES.encrypt(testPayload, derivedKey).toString();
+        
+        localStorage.setItem("pmh_encrypted_key_test", encryptededTest);
+        saveStateToLocalStorage();
+        
+        document.getElementById("settings-change-password").value = "";
+        alert("Thay đổi Mật khẩu chủ của Hub thành công!");
+    } catch(e) {
+        alert("Lỗi đổi mật khẩu: " + e.message);
+    }
+}
+
+// ==================== K. BỘ PHẦN TRỰC QUAN HÓA: DỰ DỰNG BIỂU ĐỒ CHART.JS ====================
+let mainLineChart = null;
+let mainPieChart = null;
+
+function renderDashboardCharts() {
+    const lineCtx = document.getElementById("chart-income-expense");
+    const pieCtx = document.getElementById("chart-expense-categories");
+    
+    if (!lineCtx || !pieCtx || !appState) return;
+    
+    // Phá hủy biểu đồ cũ nếu đã tồn tại để vẽ lại dữ liệu mới tránh trùng lặp đè bóng
+    if (mainLineChart) mainLineChart.destroy();
+    if (mainPieChart) mainPieChart.destroy();
+    
+    // --- 1. DỮ LIỆU BIỂU ĐỒ ĐƯỜNG THU CHI ---
+    // Nhóm giao dịch theo tháng
+    const monthlyData = {};
+    const months = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "T11", "T12"];
+    months.forEach((m, idx) => {
+        monthlyData[idx + 1] = { income: 0, expense: 0 };
+    });
+    
+    appState.transactions.forEach(t => {
+        if (!t.date) return;
+        const monthNum = parseInt(t.date.split('-')[1], 10);
+        if (monthNum >= 1 && monthNum <= 12) {
+            if (t.type === "income") {
+                monthlyData[monthNum].income += t.amount;
+            } else {
+                monthlyData[monthNum].expense += t.amount;
+            }
+        }
+    });
+    
+    const incomes = Object.values(monthlyData).map(d => d.income);
+    const expenses = Object.values(monthlyData).map(d => d.expense);
+    
+    mainLineChart = new Chart(lineCtx, {
+        type: 'bar',
+        data: {
+            labels: months,
+            datasets: [
+                {
+                    label: 'Thu nhập',
+                    data: incomes,
+                    backgroundColor: 'rgba(0, 230, 115, 0.45)',
+                    borderColor: 'hsl(145, 80%, 42%)',
+                    borderWidth: 2,
+                    borderRadius: 4
+                },
+                {
+                    label: 'Chi tiêu',
+                    data: expenses,
+                    backgroundColor: 'rgba(255, 77, 77, 0.45)',
+                    borderColor: 'hsl(355, 85%, 60%)',
+                    borderWidth: 2,
+                    borderRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#f3f4f6', font: { family: 'Plus Jakarta Sans' } } }
+            },
+            scales: {
+                x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
+                y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } }
+            }
+        }
+    });
+    
+    // --- 2. DỮ LIỆU BIỂU ĐỒ TRÒN PHÂN BỔ CHI TIÊU ---
+    const expCategories = CATEGORIES.expense;
+    const catMap = {};
+    expCategories.forEach(c => catMap[c] = 0);
+    
+    appState.transactions.filter(t => t.type === "expense").forEach(t => {
+        if (catMap[t.category] !== undefined) {
+            catMap[t.category] += t.amount;
+        } else {
+            // Chi tiêu ngoài danh mục mặc định
+            catMap["Chi tiêu Khác"] = (catMap["Chi tiêu Khác"] || 0) + t.amount;
+        }
+    });
+    
+    const labels = Object.keys(catMap).filter(k => catMap[k] > 0);
+    const values = labels.map(k => catMap[k]);
+    
+    // Nếu chưa có chi tiêu nào, hiển thị rỗng giả lập
+    const displayLabels = labels.length > 0 ? labels : ["Chưa có dữ liệu chi tiêu"];
+    const displayValues = values.length > 0 ? values : [1];
+    const colors = [
+        '#ff4d4d', '#ff944d', '#ffdb4d', '#4dff88', 
+        '#4dffff', '#4d94ff', '#944dff', '#ff4d94'
+    ];
+    
+    mainPieChart = new Chart(pieCtx, {
+        type: 'doughnut',
+        data: {
+            labels: displayLabels,
+            datasets: [{
+                data: displayValues,
+                backgroundColor: labels.length > 0 ? colors.slice(0, labels.length) : ['rgba(255,255,255,0.05)'],
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.1)'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { 
+                    position: 'bottom',
+                    labels: { color: '#f3f4f6', boxWidth: 12, font: { family: 'Plus Jakarta Sans', size: 10 } } 
+                }
+            }
+        }
+    });
+}
+
+// ==================== L. BỘ RENDER HTML ĐỘNG (DYNAMIC RENDERING VIEWS) ====================
+
+// render toàn bộ các phân hệ giao diện khi khởi tạo hoặc khi dữ liệu cập nhật
+function renderAllViews() {
+    renderDashboardView();
+    renderTransactionsView();
+    renderDebtsView();
+    renderGoalsView();
+    renderWorkspaceTasksView();
+    renderWorkspaceNotesView();
+    renderStorageFilesView();
+    renderStorageTips();
+}
+
+// 1. Dashboard View
+function renderDashboardView() {
+    // Thống kê tài chính
+    const incomeTotal = appState.transactions.filter(t => t.type === "income").reduce((sum, t) => sum + t.amount, 0);
+    const expenseTotal = appState.transactions.filter(t => t.type === "expense").reduce((sum, t) => sum + t.amount, 0);
+    
+    // Nợ thực tế cần trả (Tổng nợ gốc - Tổng đã trả)
+    const unpaidDebtTotal = appState.debts.filter(d => d.status !== "paid" && d.type === "owe_others").reduce((sum, d) => {
+        const paid = d.repayments.reduce((s, r) => s + r.amount, 0);
+        return sum + (d.amount - paid);
+    }, 0);
+    
+    // Khoản người ta nợ mình thực tế (Thu hồi được)
+    const receivableTotal = appState.debts.filter(d => d.status !== "paid" && d.type === "others_owe").reduce((sum, d) => {
+        const paid = d.repayments.reduce((s, r) => s + r.amount, 0);
+        return sum + (d.amount - paid);
+    }, 0);
+    
+    // Tài sản ròng = Thu nhập - Chi tiêu - Nợ phải trả + Khoản cho vay thu hồi
+    const netWorth = incomeTotal - expenseTotal - unpaidDebtTotal + receivableTotal;
+    
+    // Tính thu chi tháng hiện tại
+    const currentMonthStr = new Date().toISOString().split('-').slice(0, 2).join('-'); // YYYY-MM
+    const currentMonthIncome = appState.transactions
+        .filter(t => t.type === "income" && t.date && t.date.startsWith(currentMonthStr))
+        .reduce((sum, t) => sum + t.amount, 0);
+        
+    const currentMonthExpense = appState.transactions
+        .filter(t => t.type === "expense" && t.date && t.date.startsWith(currentMonthStr))
+        .reduce((sum, t) => sum + t.amount, 0);
+        
+    // Cập nhật lên Dashboard DOM
+    document.getElementById("stat-networth").textContent = `${netWorth >= 0 ? '+' : ''}${netWorth.toLocaleString('vi-VN')} ₫`;
+    document.getElementById("stat-networth").className = `value ${netWorth >= 0 ? 'positive' : 'negative'}`;
+    
+    document.getElementById("stat-month-income").textContent = `+${currentMonthIncome.toLocaleString('vi-VN')} ₫`;
+    document.getElementById("stat-month-expense").textContent = `-${currentMonthExpense.toLocaleString('vi-VN')} ₫`;
+    document.getElementById("stat-total-debt").textContent = `${unpaidDebtTotal.toLocaleString('vi-VN')} ₫`;
+    
+    // Nhắc nhở nợ sắp đến hạn
+    const debtAlerts = document.getElementById("dashboard-debt-reminders");
+    debtAlerts.innerHTML = "";
+    
+    const activeDebts = appState.debts.filter(d => d.status !== "paid");
+    if (activeDebts.length === 0) {
+        debtAlerts.innerHTML = `<p class="empty-text">Không có khoản nợ nào cần xử lý!</p>`;
+    } else {
+        // Sắp xếp nợ theo hạn thanh toán sớm nhất
+        activeDebts.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
+        activeDebts.slice(0, 5).forEach(d => {
+            const paid = d.repayments.reduce((s,r) => s + r.amount, 0);
+            const remaining = d.amount - paid;
+            const item = document.createElement("div");
+            item.className = "alert-item";
+            item.innerHTML = `
+                <div class="alert-item-details">
+                    <h4>${d.creditor} (${d.type === "owe_others" ? "Cần trả" : "Cần đòi"})</h4>
+                    <p>Hạn trả: ${d.dueDate} | Trạng thái: ${d.status === "overdue" ? "Trễ hạn" : "Đang mở"}</p>
+                </div>
+                <div class="alert-item-value ${d.type === "owe_others" ? 'negative' : 'positive'}">
+                    ${remaining.toLocaleString('vi-VN')} ₫
+                </div>
+            `;
+            debtAlerts.appendChild(item);
+        });
+    }
+    
+    // Nhiệm vụ ưu tiên Kanban
+    const priorityTasks = document.getElementById("dashboard-priority-tasks");
+    priorityTasks.innerHTML = "";
+    
+    const activeTasks = appState.tasks.filter(t => t.status !== "done");
+    if (activeTasks.length === 0) {
+        priorityTasks.innerHTML = `<p class="empty-text">Chúc mừng! Bạn đã giải quyết xong toàn bộ công việc.</p>`;
+    } else {
+        // Lọc nhiệm vụ độ ưu tiên cao hoặc trung bình lên đầu
+        activeTasks.sort((a,b) => {
+            const prioMap = { high: 3, medium: 2, low: 1 };
+            return prioMap[b.priority] - prioMap[a.priority];
+        });
+        
+        activeTasks.slice(0, 5).forEach(t => {
+            const item = document.createElement("div");
+            item.className = "alert-item";
+            item.innerHTML = `
+                <div class="alert-item-details">
+                    <h4>${t.title}</h4>
+                    <p>Độ ưu tiên: ${t.priority.toUpperCase()} | Hạn chót: ${t.dueDate}</p>
+                </div>
+                <div class="alert-item-value" style="color: var(--color-primary)">
+                    ${t.status.toUpperCase()}
+                </div>
+            `;
+            priorityTasks.appendChild(item);
+        });
+    }
+}
+
+// 2. Tab Thu nhập & Chi tiêu Table
+function renderTransactionsView() {
+    const tbody = document.getElementById("transaction-table-body");
+    const filterType = document.getElementById("filter-trans-type").value;
+    const filterCat = document.getElementById("filter-trans-category").value;
+    const searchVal = document.getElementById("search-trans").value.trim().toLowerCase();
+    
+    tbody.innerHTML = "";
+    
+    // Lọc danh sách giao dịch
+    let list = [...appState.transactions];
+    
+    if (filterType !== "all") {
+        list = list.filter(t => t.type === filterType);
+    }
+    if (filterCat !== "all") {
+        list = list.filter(t => t.category === filterCat);
+    }
+    if (searchVal) {
+        list = list.filter(t => t.notes.toLowerCase().includes(searchVal) || t.category.toLowerCase().includes(searchVal));
+    }
+    
+    // Sắp xếp ngày mới nhất lên đầu
+    list.sort((a,b) => new Date(b.date) - new Date(a.date));
+    
+    if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-text" style="text-align:center;">Không tìm thấy giao dịch nào phù hợp!</td></tr>`;
+        return;
+    }
+    
+    list.forEach(t => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>${t.date}</td>
+            <td><span class="trans-tag ${t.type === 'income' ? 'income-tag' : 'expense-tag'}">${t.type === 'income' ? 'Thu nhập' : 'Chi tiêu'}</span></td>
+            <td><strong>${t.category}</strong></td>
+            <td style="font-family: var(--font-heading); font-weight:700;" class="${t.type === 'income' ? 'positive' : 'negative'}">
+                ${t.type === 'income' ? '+' : '-'}${t.amount.toLocaleString('vi-VN')} ₫
+            </td>
+            <td><span style="color:var(--text-muted); font-size:12px;">${t.notes || ''}</span></td>
+            <td class="text-right">
+                <div class="debt-card-actions">
+                    <button class="btn-action-small" onclick="handleEditTransaction('${t.id}')" title="Sửa giao dịch"><i data-lucide="edit-2"></i></button>
+                    <button class="btn-action-small btn-delete" onclick="handleDeleteTransaction('${t.id}')" title="Xóa giao dịch"><i data-lucide="trash"></i></button>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+    
+    lucide.createIcons();
+}
+
+// 3. Tab Khoản nợ Cards
+function renderDebtsView() {
+    const listContainer = document.getElementById("debt-cards-list");
+    const activeSubTab = document.querySelector("#tab-debts .sub-tab-btn.active").getAttribute("data-debt-filter");
+    
+    listContainer.innerHTML = "";
+    
+    let list = [...appState.debts];
+    if (activeSubTab !== "all") {
+        list = list.filter(d => d.type === activeSubTab);
+    }
+    
+    if (list.length === 0) {
+        listContainer.innerHTML = `<p class="empty-text col-span-2">Không có khoản nợ nào thuộc danh mục này!</p>`;
+        return;
+    }
+    
+    list.forEach(d => {
+        const totalPaid = d.repayments.reduce((sum, r) => sum + r.amount, 0);
+        const remaining = d.amount - totalPaid;
+        const progressPct = d.amount > 0 ? Math.round((totalPaid / d.amount) * 100) : 100;
+        
+        const card = document.createElement("div");
+        card.className = `glass-card debt-card ${d.type === 'owe_others' ? 'debt-payable' : 'debt-receivable'}`;
+        card.innerHTML = `
+            <div class="debt-card-header">
+                <div class="debt-creditor-info">
+                    <h3>${d.creditor}</h3>
+                    <span class="debt-type-badge ${d.type === 'owe_others' ? 'payable' : 'receivable'}">
+                        ${d.type === 'owe_others' ? 'Tôi nợ' : 'Cho vay'}
+                    </span>
+                </div>
+                <div class="debt-card-actions">
+                    <button class="btn-action-small" onclick="openRepaymentModal('${d.id}')" title="Thanh toán đợt" ${d.status === 'paid' ? 'disabled' : ''}><i data-lucide="hand-coins"></i></button>
+                    <button class="btn-action-small" onclick="handleEditDebt('${d.id}')" title="Chỉnh sửa"><i data-lucide="edit-2"></i></button>
+                    <button class="btn-action-small btn-delete" onclick="handleDeleteDebt('${d.id}')" title="Xóa"><i data-lucide="trash-2"></i></button>
+                </div>
+            </div>
+            
+            <div class="debt-amount-row">
+                <p style="font-size:11px; color:var(--text-muted);">Số nợ ban đầu: ${d.amount.toLocaleString('vi-VN')} ₫</p>
+                <h2>${remaining.toLocaleString('vi-VN')} ₫</h2>
+            </div>
+            
+            <div class="debt-progress-section" style="display:flex; flex-direction:column; gap:6px;">
+                <div class="debt-progress-label">
+                    <span>Đã trả: ${totalPaid.toLocaleString('vi-VN')} ₫</span>
+                    <span>${progressPct}%</span>
+                </div>
+                <div class="debt-progress-bar-container">
+                    <div class="debt-progress-bar-fill" style="width: ${progressPct}%"></div>
+                </div>
+            </div>
+            
+            <div class="debt-card-footer">
+                <span class="debt-status-dot status-${d.status}">
+                    ${d.status === 'active' ? 'Đang chạy' : d.status === 'paid' ? 'Đã thanh toán' : 'Trễ hạn'}
+                </span>
+                <span>Hạn chót: ${d.dueDate}</span>
+            </div>
+        `;
+        listContainer.appendChild(card);
+    });
+    
+    lucide.createIcons();
+}
+
+// 4. Tab Kế hoạch tương lai Timeline
+function renderGoalsView() {
+    const listContainer = document.getElementById("goals-cards-list");
+    const activeSubTab = document.querySelector("#tab-goals .sub-tab-btn.active").getAttribute("data-goal-filter");
+    
+    listContainer.innerHTML = "";
+    
+    let list = [...appState.goals];
+    if (activeSubTab !== "all") {
+        list = list.filter(g => g.timeframe === activeSubTab);
+    }
+    
+    if (list.length === 0) {
+        listContainer.innerHTML = `<p class="empty-text col-span-2">Không tìm thấy mục tiêu nào!</p>`;
+        return;
+    }
+    
+    list.forEach(g => {
+        // Tính tiến độ phần trăm tích lũy tiền hoặc số lượng milestones hoàn thành
+        let progressPct = 0;
+        let progressText = "";
+        
+        if (g.targetAmount > 0) {
+            progressPct = Math.min(100, Math.round((g.currentAmount / g.targetAmount) * 100));
+            progressText = `Đã tích lũy: ${g.currentAmount.toLocaleString('vi-VN')} / ${g.targetAmount.toLocaleString('vi-VN')} ₫`;
+        } else if (g.milestones.length > 0) {
+            const comp = g.milestones.filter(m => m.completed).length;
+            progressPct = Math.round((comp / g.milestones.length) * 100);
+            progressText = `Mốc đã xong: ${comp} / ${g.milestones.length}`;
+        } else {
+            progressPct = 0;
+            progressText = "Tiến độ: 0%";
+        }
+        
+        const card = document.createElement("div");
+        card.className = "glass-card goal-card";
+        
+        let milestonesHTML = "";
+        if (g.milestones.length > 0) {
+            milestonesHTML = `<div class="goal-milestones-checklist">`;
+            g.milestones.forEach(m => {
+                milestonesHTML += `
+                    <div class="goal-milestone-item ${m.completed ? 'checked' : ''}" onclick="toggleMilestone('${g.id}', '${m.id}')">
+                        <input type="checkbox" ${m.completed ? 'checked' : ''} onclick="event.stopPropagation(); toggleMilestone('${g.id}', '${m.id}')">
+                        <span>${m.title}</span>
+                    </div>
+                `;
+            });
+            milestonesHTML += `</div>`;
+        }
+        
+        card.innerHTML = `
+            <div class="goal-card-header">
+                <div class="goal-title-info">
+                    <h3>${g.title}</h3>
+                    <span class="goal-timeframe-tag">
+                        ${g.timeframe === 'short' ? 'Ngắn hạn' : g.timeframe === 'medium' ? 'Trung hạn' : 'Dài hạn'}
+                    </span>
+                </div>
+                <div class="debt-card-actions">
+                    <button class="btn-action-small" onclick="handleEditGoal('${g.id}')" title="Sửa mục tiêu"><i data-lucide="edit-2"></i></button>
+                    <button class="btn-action-small btn-delete" onclick="handleDeleteGoal('${g.id}')" title="Xóa"><i data-lucide="trash-2"></i></button>
+                </div>
+            </div>
+            
+            <div class="goal-progress-section">
+                <div class="debt-progress-label">
+                    <span style="font-size:11px;">${progressText}</span>
+                    <span style="font-family:var(--font-heading); font-weight:700;">${progressPct}%</span>
+                </div>
+                <div class="debt-progress-bar-container">
+                    <div class="debt-progress-bar-fill goal-progress-bar-fill" style="width: ${progressPct}%"></div>
+                </div>
+            </div>
+            
+            ${milestonesHTML}
+            
+            <div class="debt-card-footer" style="margin-top:auto; font-size:11px;">
+                <span>Hạn đạt: ${g.dueDate}</span>
+            </div>
+        `;
+        listContainer.appendChild(card);
+    });
+    
+    lucide.createIcons();
+}
+
+// Chỉnh sửa khoản nợ
+function handleEditDebt(id) {
+    const debt = appState.debts.find(d => d.id === id);
+    if (!debt) return;
+    
+    document.getElementById("debt-id").value = debt.id;
+    document.getElementById("debt-creditor").value = debt.creditor;
+    document.getElementById("debt-type").value = debt.type;
+    document.getElementById("debt-interest").value = debt.interestRate;
+    document.getElementById("debt-amount").value = debt.amount;
+    document.getElementById("debt-due-date").value = debt.dueDate;
+    document.getElementById("debt-status").value = debt.status;
+    
+    document.getElementById("debt-modal-title").textContent = "Chỉnh sửa khoản nợ";
+    openModal("modal-debt");
+}
+
+// Chỉnh sửa mục tiêu kế hoạch
+function handleEditGoal(id) {
+    const goal = appState.goals.find(g => g.id === id);
+    if (!goal) return;
+    
+    document.getElementById("goal-id").value = goal.id;
+    document.getElementById("goal-title").value = goal.title;
+    document.getElementById("goal-timeframe").value = goal.timeframe;
+    document.getElementById("goal-due-date").value = goal.dueDate;
+    document.getElementById("goal-target-amount").value = goal.targetAmount;
+    document.getElementById("goal-current-amount").value = goal.currentAmount;
+    
+    const milesStr = goal.milestones.map(m => m.title).join(', ');
+    document.getElementById("goal-milestones-input").value = milesStr;
+    
+    document.getElementById("goal-modal-title").textContent = "Chỉnh sửa kế hoạch";
+    openModal("modal-goal");
+}
+
+// 5. Phân hệ A: Bảng Kanban Tasks
+function renderWorkspaceTasksView() {
+    const counts = { todo: 0, inprogress: 0, review: 0, done: 0 };
+    const containers = {
+        todo: document.getElementById("tasks-todo"),
+        inprogress: document.getElementById("tasks-inprogress"),
+        review: document.getElementById("tasks-review"),
+        done: document.getElementById("tasks-done")
+    };
+    
+    // Clear sạch container cũ
+    Object.keys(containers).forEach(k => {
+        if (containers[k]) containers[k].innerHTML = "";
+    });
+    
+    appState.tasks.forEach(t => {
+        counts[t.status]++;
+        
+        const card = document.createElement("div");
+        card.className = "task-card";
+        card.setAttribute("draggable", "true");
+        card.setAttribute("ondragstart", `dragTask(event, '${t.id}')`);
+        
+        card.innerHTML = `
+            <div class="task-card-header">
+                <h4>${t.title}</h4>
+                <span class="task-priority-tag priority-${t.priority}">${t.priority === 'low' ? 'Thấp' : t.priority === 'medium' ? 'Vừa' : 'Cao'}</span>
+            </div>
+            ${t.description ? `<div class="task-card-body"><p>${t.description}</p></div>` : ''}
+            <div class="task-card-footer">
+                <div class="task-due-date">
+                    <i data-lucide="clock"></i>
+                    <span>${t.dueDate}</span>
+                </div>
+                <div class="debt-card-actions">
+                    <button class="btn-action-small" onclick="handleEditTask('${t.id}')" title="Sửa công việc"><i data-lucide="edit-2"></i></button>
+                    <button class="btn-action-small btn-delete" onclick="handleDeleteTask('${t.id}')" title="Xóa công việc"><i data-lucide="trash-2"></i></button>
+                </div>
+            </div>
+        `;
+        
+        if (containers[t.status]) {
+            containers[t.status].appendChild(card);
+        }
+    });
+    
+    // Cập nhật số lượng tiêu đề cột
+    Object.keys(counts).forEach(k => {
+        const badge = document.getElementById(`count-${k}`);
+        if (badge) badge.textContent = counts[k];
+    });
+    
+    lucide.createIcons();
+}
+
+function handleEditTask(id) {
+    const task = appState.tasks.find(t => t.id === id);
+    if (!task) return;
+    
+    document.getElementById("task-id").value = task.id;
+    document.getElementById("task-title").value = task.title;
+    document.getElementById("task-desc").value = task.description;
+    document.getElementById("task-status").value = task.status;
+    document.getElementById("task-priority").value = task.priority;
+    document.getElementById("task-due-date").value = task.dueDate;
+    
+    document.getElementById("task-modal-title").textContent = "Chỉnh sửa công việc";
+    openModal("modal-task");
+}
+
+// 6. Phân hệ B: Sổ tay Ghi chú
+function renderWorkspaceNotesView() {
+    const grid = document.getElementById("notes-list-grid");
+    if (!grid) return;
+    
+    grid.innerHTML = "";
+    
+    if (appState.notes.length === 0) {
+        grid.innerHTML = `<p class="empty-text">Sổ tay ghi chú của bạn chưa có trang nào. Hãy tạo ghi chú đầu tiên bên trái!</p>`;
+        return;
+    }
+    
+    // Mới nhất lên đầu
+    const list = [...appState.notes].reverse();
+    
+    list.forEach(n => {
+        const card = document.createElement("div");
+        card.className = "glass-card note-card";
+        card.innerHTML = `
+            <h3>${n.title}</h3>
+            <p>${n.content.replace(/\n/g, '<br>')}</p>
+            <div class="note-card-footer">
+                <span><i data-lucide="calendar" style="width:11px;height:11px;display:inline-block;vertical-align:middle;margin-right:4px;"></i> ${n.createdAt}</span>
+                <div class="debt-card-actions">
+                    <button class="btn-action-small" onclick="copyNoteForNotebookLM('${n.id}')" title="Sao chép cho NotebookLM"><i data-lucide="brain-circuit"></i></button>
+                    <button class="btn-action-small" onclick="handleEditNote('${n.id}')" title="Chỉnh sửa"><i data-lucide="edit-2"></i></button>
+                    <button class="btn-action-small btn-delete" onclick="handleDeleteNote('${n.id}')" title="Xóa"><i data-lucide="trash-2"></i></button>
+                </div>
+            </div>
+        `;
+        grid.appendChild(card);
+    });
+    
+    lucide.createIcons();
+}
+
+// 7. Kho tệp tài liệu lưu trữ
+function renderStorageFilesView() {
+    const container = document.getElementById("storage-files-container");
+    if (!container) return;
+    
+    container.innerHTML = "";
+    
+    if (appState.storageFiles.length === 0) {
+        container.innerHTML = `<p class="empty-text">Kho lưu trữ chưa có hồ sơ nào. Hãy tải lên hóa đơn, hợp đồng ở trên.</p>`;
+        return;
+    }
+    
+    const list = [...appState.storageFiles].reverse();
+    list.forEach(f => {
+        const item = document.createElement("div");
+        item.className = "file-item";
+        item.innerHTML = `
+            <div class="file-info">
+                <i data-lucide="file-text" class="file-icon"></i>
+                <div class="file-name-meta">
+                    <h4 title="${f.name}">${f.name}</h4>
+                    <p>${f.size} | Ngày: ${f.uploadedAt}</p>
+                </div>
+            </div>
+            <button class="btn-action-small btn-delete" onclick="handleDeleteStorageFile('${f.id}')" title="Xóa tài liệu"><i data-lucide="trash-2"></i></button>
+        `;
+        container.appendChild(item);
+    });
+    
+    lucide.createIcons();
+}
+
+// 8. Cẩm nang Mẹo Lưu trữ
+function renderStorageTips() {
+    const container = document.getElementById("tips-container-list");
+    if (!container) return;
+    
+    container.innerHTML = "";
+    
+    const tips = JSON.parse(localStorage.getItem("pmh_storage_tips")) || INITIAL_STORAGE_TIPS;
+    
+    // Ghim lên đầu
+    const sortedTips = [...tips].sort((a,b) => b.pinned - a.pinned);
+    
+    sortedTips.forEach(tip => {
+        const item = document.createElement("div");
+        item.className = `tip-item ${tip.pinned ? 'pinned' : ''}`;
+        item.innerHTML = `
+            <i data-lucide="lightbulb" class="tip-icon"></i>
+            <div class="tip-content">
+                <h4>${tip.title}</h4>
+                <p>${tip.content}</p>
+            </div>
+            <button class="btn-pin-tip" onclick="togglePinTip('${tip.id}')" title="${tip.pinned ? 'Gỡ ghim' : 'Ghim lên đầu'}">
+                <i data-lucide="pin" style="width:14px; height:14px;"></i>
+            </button>
+        `;
+        container.appendChild(item);
+    });
+    
+    lucide.createIcons();
+}
+
+// ==================== M. KHỞI TẠO BỘ LẮNG NGHE SỰ KIỆN HÀNH ĐỘNG VÀ ĐÓNG POPUP ====================
+
+// Mở bất kỳ Modal Hộp thoại
+function openModal(modalId) {
+    document.getElementById(modalId).classList.remove("hidden");
+    lucide.createIcons();
+}
+
+// Đóng Hộp thoại
+function closeModal(modalId) {
+    document.getElementById(modalId).classList.add("hidden");
+}
+
+function initAppComponents() {
+    // 1. Phân hệ đổi Tabs trong Tab Công việc Workspace (Kanban / Sổ tay / Lưu trữ)
+    const wTabs = document.querySelectorAll(".w-sub-tab");
+    const wPanels = document.querySelectorAll(".workspace-panel");
+    wTabs.forEach(tab => {
+        tab.addEventListener("click", () => {
+            wTabs.forEach(t => t.classList.remove("active"));
+            tab.classList.add("active");
+            
+            const targetSection = tab.getAttribute("data-workspace-section");
+            wPanels.forEach(p => {
+                if (p.id === `w-panel-${targetSection}`) {
+                    p.classList.add("active");
+                } else {
+                    p.classList.remove("active");
+                }
+            });
+        });
+    });
+
+    // 2. Chuyển sub-tab trong Khoản nợ (Tất cả / Tôi nợ / Cho vay)
+    const debtSubTabs = document.querySelectorAll("#tab-debts .sub-tab-btn");
+    debtSubTabs.forEach(btn => {
+        btn.addEventListener("click", () => {
+            debtSubTabs.forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            renderDebtsView();
+        });
+    });
+
+    // 3. Chuyển sub-tab trong Kế hoạch tương lai (Ngắn / Trung / Dài hạn)
+    const goalSubTabs = document.querySelectorAll("#tab-goals .sub-tab-btn");
+    goalSubTabs.forEach(btn => {
+        btn.addEventListener("click", () => {
+            goalSubTabs.forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            renderGoalsView();
+        });
+    });
+
+    // 4. Lắng nghe sự kiện Thay đổi loại thu chi và tự nhận diện Categories
+    document.getElementById("trans-type").addEventListener("change", () => {
+        updateCategoryDropdown("trans-type", "trans-category");
+    });
+    updateCategoryDropdown("trans-type", "trans-category");
+
+    // 5. Đăng ký sự kiện nộp Form Giao dịch
+    document.getElementById("transaction-form").addEventListener("submit", handleSaveTransaction);
+    document.getElementById("btn-reset-trans").addEventListener("click", () => {
+        document.getElementById("transaction-form").reset();
+        document.getElementById("trans-id").value = "";
+        document.getElementById("ocr-preview-container").classList.add("hidden");
+        document.getElementById("ocr-file-input").value = "";
+        updateCategoryDropdown("trans-type", "trans-category");
+    });
+
+    // 6. Đăng ký sự kiện nộp Form Sổ tay Ghi chú
+    document.getElementById("note-form").addEventListener("submit", handleSaveNote);
+    document.getElementById("btn-reset-note").addEventListener("click", () => {
+        document.getElementById("note-form").reset();
+        document.getElementById("note-id").value = "";
+        document.getElementById("note-form-title").textContent = "Tạo ghi chú mới";
+    });
+
+    // 7. Modals trigger buttons
+    document.getElementById("btn-add-debt-modal").addEventListener("click", () => {
+        document.getElementById("debt-form").reset();
+        document.getElementById("debt-id").value = "";
+        document.getElementById("debt-modal-title").textContent = "Ghi nhận khoản nợ mới";
+        openModal("modal-debt");
+    });
+    document.getElementById("debt-form").addEventListener("submit", handleSaveDebt);
+
+    document.getElementById("btn-add-goal-modal").addEventListener("click", () => {
+        document.getElementById("goal-form").reset();
+        document.getElementById("goal-id").value = "";
+        document.getElementById("goal-modal-title").textContent = "Thêm kế hoạch mới";
+        openModal("modal-goal");
+    });
+    document.getElementById("goal-form").addEventListener("submit", handleSaveGoal);
+
+    document.getElementById("btn-add-task-modal").addEventListener("click", () => {
+        document.getElementById("task-form").reset();
+        document.getElementById("task-id").value = "";
+        document.getElementById("task-modal-title").textContent = "Tạo nhiệm vụ mới";
+        document.getElementById("task-due-date").value = new Date().toISOString().split('T')[0];
+        openModal("modal-task");
+    });
+    document.getElementById("task-form").addEventListener("submit", handleSaveTask);
+
+    document.getElementById("repayment-form").addEventListener("submit", handleSaveRepayment);
+
+    // 8. OCR scanner initialization
+    initOCRScanner();
+
+    // 9. virtual storage initialization
+    initVirtualStorage();
+
+    // 10. NotebookLM export integration button
+    document.getElementById("btn-export-notebooklm").addEventListener("click", exportAllDataToNotebookLM);
+
+    // 11. Settings logic
+    document.getElementById("btn-save-settings").addEventListener("click", handleSaveSettings);
+    document.getElementById("btn-test-connection").addEventListener("click", () => testGoogleSheetsConnection(true));
+    document.getElementById("btn-change-password").addEventListener("click", handlePasswordChange);
+    document.getElementById("btn-clear-local-data").addEventListener("click", clearAllHubData);
+    document.getElementById("btn-backup-local-data").addEventListener("click", exportLocalDataBackup);
+    
+    // Nạp link ban đầu từ state
+    document.getElementById("settings-web-app-url").value = appState.settings.webAppUrl || "";
+    document.getElementById("settings-sync-token").value = appState.settings.syncToken || "PersonalManagerHub2026";
+    
+    // Tạo block code hiển thị copy Apps Script
+    renderAppsScriptCode();
+    document.getElementById("btn-copy-apps-script").addEventListener("click", () => {
+        const code = document.getElementById("apps-script-code-display").textContent;
+        navigator.clipboard.writeText(code).then(() => {
+            alert("Đã sao chép mã nguồn Google Apps Script vào Clipboard của bạn!");
+        });
+    });
+
+    // 12. Manual lock
+    document.getElementById("btn-manual-lock").addEventListener("click", () => {
+        if (confirm("Bạn muốn khóa ứng dụng Hub ngay bây giờ?")) {
+            lockApp();
+        }
+    });
+
+    // 13. Lắng nghe sự kiện lọc dữ liệu Thu chi
+    document.getElementById("filter-trans-type").addEventListener("change", renderTransactionsView);
+    document.getElementById("filter-trans-category").addEventListener("change", renderTransactionsView);
+    document.getElementById("search-trans").addEventListener("input", renderTransactionsView);
+    
+    // Tự động thay đổi danh mục lọc động dựa trên loại thu/chi được lọc
+    document.getElementById("filter-trans-type").addEventListener("change", (e) => {
+        const catSelect = document.getElementById("filter-trans-category");
+        catSelect.innerHTML = `<option value="all">Tất cả danh mục</option>`;
+        
+        const type = e.target.value;
+        if (type === "all") {
+            // Hiển thị cả hai
+            [...CATEGORIES.income, ...CATEGORIES.expense].forEach(cat => {
+                const opt = document.createElement("option");
+                opt.value = cat;
+                opt.textContent = cat;
+                catSelect.appendChild(opt);
+            });
+        } else {
+            CATEGORIES[type].forEach(cat => {
+                const opt = document.createElement("option");
+                opt.value = cat;
+                opt.textContent = cat;
+                catSelect.appendChild(opt);
+            });
+        }
+    });
+    
+    // Kích hoạt ban đầu danh mục lọc
+    const initialCatSelect = document.getElementById("filter-trans-category");
+    [...CATEGORIES.income, ...CATEGORIES.expense].forEach(cat => {
+        const opt = document.createElement("option");
+        opt.value = cat;
+        opt.textContent = cat;
+        initialCatSelect.appendChild(opt);
+    });
+
+    // 14. Bộ cập nhật Đồng hồ số và Lời chào thời gian thực
+    updateHeaderClockAndGreetings();
+    setInterval(updateHeaderClockAndGreetings, 1000);
+    
+    // Đăng ký nút Đồng bộ nhanh trong Header
+    const quickSyncBtn = document.getElementById("btn-quick-sync");
+    if (appState.settings && appState.settings.webAppUrl) {
+        quickSyncBtn.classList.remove("hidden");
+    }
+    quickSyncBtn.addEventListener("click", () => {
+        pullAllDataFromGoogleSheets(); // Lấy dữ liệu mới nhất về và đồng bộ
+    });
+}
+
+// Trực quan hóa Đồng hồ số và Ngày tháng + Lời chào thông minh
+function updateHeaderClockAndGreetings() {
+    const clock = document.getElementById("digital-clock");
+    const greeting = document.getElementById("greeting-text");
+    const dateText = document.getElementById("header-date");
+    
+    if (!clock || !greeting || !dateText) return;
+    
+    const now = new Date();
+    
+    // 1. Cập nhật đồng hồ số
+    clock.textContent = now.toTimeString().split(' ')[0];
+    
+    // 2. Cập nhật lời chào dựa trên giờ thực tế
+    const hour = now.getHours();
+    let greet = "Chào ngày mới!";
+    if (hour >= 5 && hour < 11) {
+        greet = "Chào buổi sáng tốt lành! 🌅";
+    } else if (hour >= 11 && hour < 14) {
+        greet = "Chúc bạn buổi trưa ngon miệng! ☀️";
+    } else if (hour >= 14 && hour < 18) {
+        greet = "Chúc bạn buổi chiều năng động! ☕";
+    } else if (hour >= 18 && hour < 22) {
+        greet = "Chúc bạn buổi tối ấm áp! 🌙";
+    } else {
+        greet = "Đã muộn rồi, chúc bạn ngủ ngon! 💤";
+    }
+    greeting.textContent = greet;
+    
+    // 3. Cập nhật ngày tháng tiếng Việt
+    const weekdays = ["Chủ nhật", "Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Thứ bảy"];
+    const dayName = weekdays[now.getDay()];
+    const day = now.getDate();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+    
+    dateText.textContent = `${dayName}, ngày ${day} tháng ${month}, năm ${year}`;
+}

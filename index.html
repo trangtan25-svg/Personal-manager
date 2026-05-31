@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Personal Manager Hub - Quản lý Tài chính, Công việc & Kế hoạch Cá nhân</title>
+    
+    <!-- Google Fonts: Plus Jakarta Sans & Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- CDNs cho các thư viện bảo mật và trực quan -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js" integrity="sha512-E8QSvWZ0GeF533DGfFf7MIP1LiGFFRC68COP+2i3VbV1j5q5gYe2qJC8Y0t4sFUUUCl65LqxUMUXT73gQ3A25A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- CSS Tùy chỉnh Cao cấp -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- ==================== MÀN HÌNH KHÓA / ĐĂNG NHẬP (LOCK SCREEN) ==================== -->
+    <div id="lock-screen" class="lock-screen-container">
+        <div class="lock-card glass">
+            <div class="lock-header">
+                <div class="app-logo-icon-glowing">
+                    <i data-lucide="shield-check"></i>
+                </div>
+                <h1>PERSONAL HUB</h1>
+                <p id="lock-subtitle">Trung tâm quản lý cá nhân & tài chính bảo mật</p>
+            </div>
+            
+            <div id="lock-form-container" class="lock-form">
+                <!-- Sẽ được điền tự động bằng JS (Form tạo mật khẩu mới hoặc Form nhập mật khẩu mở khóa) -->
+            </div>
+            
+            <div class="lock-footer">
+                <i data-lucide="lock"></i> Mã hóa bảo mật cục bộ chuẩn quân sự AES-256
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== GIAO DIỆN CHÍNH CỦA ỨNG DỤNG ==================== -->
+    <div id="app-layout" class="app-layout hidden">
+        
+        <!-- SIDEBAR ĐIỀU HƯỚNG (DESKTOP & IPAD NGANG) -->
+        <aside class="sidebar glass">
+            <div class="sidebar-logo">
+                <div class="logo-icon"><i data-lucide="activity"></i></div>
+                <h2>Personal Hub</h2>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <ul>
+                    <li class="nav-item active" data-tab="dashboard">
+                        <i data-lucide="layout-dashboard"></i>
+                        <span>Tổng quan</span>
+                    </li>
+                    <li class="nav-item" data-tab="income">
+                        <i data-lucide="trending-up"></i>
+                        <span>Thu & Chi</span>
+                    </li>
+                    <li class="nav-item" data-tab="debts">
+                        <i data-lucide="credit-card"></i>
+                        <span>Khoản nợ</span>
+                    </li>
+                    <li class="nav-item" data-tab="goals">
+                        <i data-lucide="compass"></i>
+                        <span>Kế hoạch</span>
+                    </li>
+                    <li class="nav-item" data-tab="workspace">
+                        <i data-lucide="briefcase"></i>
+                        <span>Công việc</span>
+                    </li>
+                    <li class="nav-item" data-tab="settings">
+                        <i data-lucide="settings"></i>
+                        <span>Cài đặt</span>
+                    </li>
+                </ul>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="sync-status-badge offline" id="sync-indicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Cục bộ (Offline)</span>
+                </div>
+                <button class="btn-lock-app" id="btn-manual-lock" title="Khóa ứng dụng ngay lập tức">
+                    <i data-lucide="log-out"></i> Khóa Hub
+                </button>
+            </div>
+        </aside>
+
+        <!-- NỘI DUNG CHÍNH (MAIN CONTENT) -->
+        <main class="main-content">
+            
+            <!-- HEADER CHÍNH -->
+            <header class="app-header glass">
+                <div class="header-left">
+                    <h1 id="greeting-text">Chào ngày mới!</h1>
+                    <p id="header-date">Chủ nhật, ngày 31 tháng 5, 2026</p>
+                </div>
+                <div class="header-right">
+                    <div id="digital-clock" class="digital-clock">14:50:00</div>
+                    <button class="btn btn-sync-header hidden" id="btn-quick-sync" title="Đồng bộ hóa dữ liệu với Google Sheets">
+                        <i data-lucide="refresh-cw"></i> <span>Đồng bộ</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- NỘI DUNG CHI TIẾT TỪNG TABS -->
+            <div class="tab-content-container">
+
+                <!-- 1. TAB DASHBOARD -->
+                <section class="tab-panel active" id="tab-dashboard">
+                    <!-- Widget thẻ số liệu chính -->
+                    <div class="stats-grid">
+                        <div class="stat-card glass-card card-networth">
+                            <div class="card-icon"><i data-lucide="wallet"></i></div>
+                            <div class="card-info">
+                                <h3>Tài sản ròng</h3>
+                                <p class="value positive" id="stat-networth">0 ₫</p>
+                            </div>
+                        </div>
+                        <div class="stat-card glass-card card-income">
+                            <div class="card-icon"><i data-lucide="arrow-up-right"></i></div>
+                            <div class="card-info">
+                                <h3>Thu nhập tháng này</h3>
+                                <p class="value positive" id="stat-month-income">0 ₫</p>
+                            </div>
+                        </div>
+                        <div class="stat-card glass-card card-expense">
+                            <div class="card-icon"><i data-lucide="arrow-down-left"></i></div>
+                            <div class="card-info">
+                                <h3>Chi tiêu tháng này</h3>
+                                <p class="value negative" id="stat-month-expense">0 ₫</p>
+                            </div>
+                        </div>
+                        <div class="stat-card glass-card card-debt">
+                            <div class="card-icon"><i data-lucide="shield-alert"></i></div>
+                            <div class="card-info">
+                                <h3>Tổng nợ cần trả</h3>
+                                <p class="value alert" id="stat-total-debt">0 ₫</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Layout Biểu đồ -->
+                    <div class="dashboard-grid">
+                        <div class="dashboard-chart-card glass-card">
+                            <div class="card-header">
+                                <h2>Thu chi & Dòng tiền</h2>
+                                <i data-lucide="bar-chart-2"></i>
+                            </div>
+                            <div class="chart-wrapper">
+                                <canvas id="chart-income-expense"></canvas>
+                            </div>
+                        </div>
+                        
+                        <div class="dashboard-chart-card glass-card">
+                            <div class="card-header">
+                                <h2>Phân bổ chi tiêu</h2>
+                                <i data-lucide="pie-chart"></i>
+                            </div>
+                            <div class="chart-wrapper">
+                                <canvas id="chart-expense-categories"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Panel danh sách nhiệm vụ / nợ đến hạn sớm -->
+                    <div class="alerts-grid">
+                        <div class="alerts-card glass-card">
+                            <div class="card-header alert-header-orange">
+                                <h2>Nhắc nhở nợ sắp đến hạn</h2>
+                                <i data-lucide="calendar"></i>
+                            </div>
+                            <div class="alert-list" id="dashboard-debt-reminders">
+                                <!-- Điền bằng JS -->
+                                <p class="empty-text">Không có khoản nợ nào sắp đến hạn!</p>
+                            </div>
+                        </div>
+                        
+                        <div class="alerts-card glass-card">
+                            <div class="card-header alert-header-indigo">
+                                <h2>Nhiệm vụ cần ưu tiên</h2>
+                                <i data-lucide="check-circle-2"></i>
+                            </div>
+                            <div class="alert-list" id="dashboard-priority-tasks">
+                                <!-- Điền bằng JS -->
+                                <p class="empty-text">Chúc mừng! Bạn đã hoàn thành tất cả công việc quan trọng.</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 2. TAB THU NHẬP & CHI TIÊU -->
+                <section class="tab-panel" id="tab-income">
+                    <div class="panel-layout-split">
+                        
+                        <!-- Cột Trái: Nhập liệu (Manual & OCR Scanner) -->
+                        <div class="split-sidebar">
+                            
+                            <!-- OCR SCREENSHOT SCANNER CARD -->
+                            <div class="glass-card scanner-card">
+                                <div class="card-header gradient-header-emerald">
+                                    <h2>Quét ảnh giao dịch (AI OCR)</h2>
+                                    <i data-lucide="scan-line"></i>
+                                </div>
+                                <div class="scanner-body">
+                                    <div class="drop-zone" id="ocr-drop-zone">
+                                        <i data-lucide="image-plus" class="upload-icon"></i>
+                                        <p>Kéo thả ảnh hóa đơn ngân hàng / MoMo vào đây hoặc bấm để chọn tệp</p>
+                                        <span class="file-spec">Hỗ trợ ảnh hóa đơn Vietcombank, Techcombank, MoMo, v.v.</span>
+                                        <input type="file" id="ocr-file-input" accept="image/*" class="hidden-file-input">
+                                    </div>
+                                    <div id="ocr-preview-container" class="ocr-preview-area hidden">
+                                        <img id="ocr-preview-img" src="" alt="Transaction Screenshot">
+                                        <div class="scanning-overlay hidden" id="ocr-scanner-line">
+                                            <div class="scan-laser"></div>
+                                        </div>
+                                    </div>
+                                    <div id="ocr-status-message" class="ocr-status hidden">
+                                        <span class="spinner"></span> <span id="ocr-status-text">Đang nhận diện ký tự...</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- FORM THÊM THỦ CÔNG -->
+                            <div class="glass-card">
+                                <div class="card-header">
+                                    <h2 id="transaction-form-title">Ghi nhận giao dịch mới</h2>
+                                    <i data-lucide="edit-3"></i>
+                                </div>
+                                <form id="transaction-form" class="form-layout">
+                                    <input type="hidden" id="trans-id">
+                                    <div class="form-group-row">
+                                        <div class="form-group">
+                                            <label for="trans-type">Loại giao dịch</label>
+                                            <select id="trans-type" class="form-input" required>
+                                                <option value="income" selected>Thu nhập (+)</option>
+                                                <option value="expense">Chi tiêu (-)</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="trans-date">Ngày giao dịch</label>
+                                            <input type="date" id="trans-date" class="form-input" required>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="trans-amount">Số tiền (₫)</label>
+                                        <input type="number" id="trans-amount" class="form-input-highlight" placeholder="Nhập số tiền..." required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="trans-category">Danh mục</label>
+                                        <select id="trans-category" class="form-input" required>
+                                            <!-- Tùy chọn sẽ thay đổi dựa trên Loại thu/chi qua JS -->
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="trans-notes">Ghi chú / Chi tiết</label>
+                                        <textarea id="trans-notes" class="form-input" placeholder="Nhập ghi chú giao dịch..." rows="3"></textarea>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button type="button" class="btn btn-secondary" id="btn-reset-trans">Hủy</button>
+                                        <button type="submit" class="btn btn-primary" id="btn-save-trans">Lưu giao dịch</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- Cột Phải: Bảng Danh Sách & Lọc dữ liệu -->
+                        <div class="split-main">
+                            <div class="glass-card list-card">
+                                <div class="list-filters-bar">
+                                    <div class="search-box">
+                                        <i data-lucide="search"></i>
+                                        <input type="text" id="search-trans" placeholder="Tìm kiếm ghi chú, danh mục...">
+                                    </div>
+                                    <div class="filter-controls">
+                                        <select id="filter-trans-type" class="filter-select">
+                                            <option value="all">Tất cả thu chi</option>
+                                            <option value="income">Chỉ Thu nhập</option>
+                                            <option value="expense">Chỉ Chi tiêu</option>
+                                        </select>
+                                        <select id="filter-trans-category" class="filter-select">
+                                            <option value="all">Tất cả danh mục</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="table-wrapper">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Ngày</th>
+                                                <th>Loại</th>
+                                                <th>Danh mục</th>
+                                                <th>Số tiền</th>
+                                                <th>Ghi chú</th>
+                                                <th class="text-right">Thao tác</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="transaction-table-body">
+                                            <!-- Điền bằng JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 3. TAB KHOẢN NỢ -->
+                <section class="tab-panel" id="tab-debts">
+                    <div class="tab-header-toggle">
+                        <button class="sub-tab-btn active" data-debt-filter="all">Tất cả khoản nợ</button>
+                        <button class="sub-tab-btn" data-debt-filter="owe_others">Nợ phải trả (Tôi nợ)</button>
+                        <button class="sub-tab-btn" data-debt-filter="others_owe">Cho vay (Họ nợ tôi)</button>
+                        <button class="btn btn-primary ml-auto" id="btn-add-debt-modal">
+                            <i data-lucide="plus"></i> Ghi nhận khoản nợ mới
+                        </button>
+                    </div>
+
+                    <!-- Lưới hiển thị các thẻ khoản nợ -->
+                    <div class="debt-cards-grid" id="debt-cards-list">
+                        <!-- Điền bằng JS -->
+                    </div>
+                </section>
+
+                <!-- 4. TAB KẾ HOẠCH TƯƠNG LAI -->
+                <section class="tab-panel" id="tab-goals">
+                    <div class="tab-header-toggle">
+                        <button class="sub-tab-btn active" data-goal-filter="all">Tất cả mục tiêu</button>
+                        <button class="sub-tab-btn" data-goal-filter="short">Ngắn hạn (1-12 tháng)</button>
+                        <button class="sub-tab-btn" data-goal-filter="medium">Trung hạn (1-3 năm)</button>
+                        <button class="sub-tab-btn" data-goal-filter="long">Dài hạn (Trên 3 năm)</button>
+                        <button class="btn btn-primary ml-auto" id="btn-add-goal-modal">
+                            <i data-lucide="plus"></i> Thêm kế hoạch mới
+                        </button>
+                    </div>
+
+                    <!-- Lưới kế hoạch dạng thẻ timeline -->
+                    <div class="goals-cards-grid" id="goals-cards-list">
+                        <!-- Điền bằng JS -->
+                    </div>
+                </section>
+
+                <!-- 5. TAB CÔNG VIỆC & LƯU TRỮ (WORKSPACE) -->
+                <section class="tab-panel" id="tab-workspace">
+                    
+                    <!-- MENU PHÂN HỆ WORKSPACE -->
+                    <div class="workspace-sub-tabs glass">
+                        <button class="w-sub-tab active" data-workspace-section="kanban">
+                            <i data-lucide="kanban"></i> Bảng Kanban
+                        </button>
+                        <button class="w-sub-tab" data-workspace-section="notes">
+                            <i data-lucide="sticky-note"></i> Sổ tay Ghi chú
+                        </button>
+                        <button class="w-sub-tab" data-workspace-section="storage">
+                            <i data-lucide="folder-open"></i> Lưu trữ & Mẹo hay
+                        </button>
+                    </div>
+
+                    <!-- PHÂN HỆ A: BẢNG KANBAN -->
+                    <div class="workspace-panel active" id="w-panel-kanban">
+                        <div class="kanban-header-bar">
+                            <h2>Bảng quản lý công việc</h2>
+                            <button class="btn btn-primary" id="btn-add-task-modal">
+                                <i data-lucide="plus"></i> Tạo nhiệm vụ mới
+                            </button>
+                        </div>
+                        
+                        <div class="kanban-board">
+                            <!-- CỘT 1: CẦN LÀM -->
+                            <div class="kanban-column" data-status="todo">
+                                <div class="column-header">
+                                    <span class="status-indicator status-todo"></span>
+                                    <h3>Cần làm</h3>
+                                    <span class="task-count" id="count-todo">0</span>
+                                </div>
+                                <div class="task-cards-container" id="tasks-todo" ondragover="allowDrop(event)" ondrop="dropTask(event, 'todo')">
+                                    <!-- Thẻ nhiệm vụ bằng JS -->
+                                </div>
+                            </div>
+                            
+                            <!-- CỘT 2: ĐANG LÀM -->
+                            <div class="kanban-column" data-status="inprogress">
+                                <div class="column-header">
+                                    <span class="status-indicator status-inprogress"></span>
+                                    <h3>Đang làm</h3>
+                                    <span class="task-count" id="count-inprogress">0</span>
+                                </div>
+                                <div class="task-cards-container" id="tasks-inprogress" ondragover="allowDrop(event)" ondrop="dropTask(event, 'inprogress')">
+                                    <!-- Thẻ nhiệm vụ bằng JS -->
+                                </div>
+                            </div>
+                            
+                            <!-- CỘT 3: KIỂM TRA -->
+                            <div class="kanban-column" data-status="review">
+                                <div class="column-header">
+                                    <span class="status-indicator status-review"></span>
+                                    <h3>Kiểm tra</h3>
+                                    <span class="task-count" id="count-review">0</span>
+                                </div>
+                                <div class="task-cards-container" id="tasks-review" ondragover="allowDrop(event)" ondrop="dropTask(event, 'review')">
+                                    <!-- Thẻ nhiệm vụ bằng JS -->
+                                </div>
+                            </div>
+                            
+                            <!-- CỘT 4: ĐÃ XONG -->
+                            <div class="kanban-column" data-status="done">
+                                <div class="column-header">
+                                    <span class="status-indicator status-done"></span>
+                                    <h3>Đã xong</h3>
+                                    <span class="task-count" id="count-done">0</span>
+                                </div>
+                                <div class="task-cards-container" id="tasks-done" ondragover="allowDrop(event)" ondrop="dropTask(event, 'done')">
+                                    <!-- Thẻ nhiệm vụ bằng JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PHÂN HỆ B: SỔ TAY GHI CHÚ -->
+                    <div class="workspace-panel" id="w-panel-notes">
+                        <div class="panel-layout-split">
+                            <div class="split-sidebar">
+                                <div class="glass-card">
+                                    <div class="card-header">
+                                        <h2 id="note-form-title">Tạo ghi chú mới</h2>
+                                        <i data-lucide="pencil"></i>
+                                    </div>
+                                    <form id="note-form" class="form-layout">
+                                        <input type="hidden" id="note-id">
+                                        <div class="form-group">
+                                            <label for="note-title">Tiêu đề ghi chú</label>
+                                            <input type="text" id="note-title" class="form-input" placeholder="Ví dụ: Ý tưởng dự án..." required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="note-content">Nội dung</label>
+                                            <textarea id="note-content" class="form-input" placeholder="Nhập nội dung ý tưởng, kế hoạch..." rows="8" required></textarea>
+                                        </div>
+                                        <div class="form-actions">
+                                            <button type="button" class="btn btn-secondary" id="btn-reset-note">Hủy</button>
+                                            <button type="submit" class="btn btn-primary">Lưu ghi chú</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                            
+                            <div class="split-main">
+                                <div class="notes-grid" id="notes-list-grid">
+                                    <!-- Các thẻ ghi chú bằng JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PHÂN HỆ C: LƯU TRỮ VÀ MẸO HAY -->
+                    <div class="workspace-panel" id="w-panel-storage">
+                        
+                        <!-- ROW 1: NotebookLM Hub & Hướng dẫn -->
+                        <div class="notebooklm-card glass-card">
+                            <div class="notebooklm-header">
+                                <div class="notebooklm-title-group">
+                                    <div class="notebook-icon"><i data-lucide="brain-circuit"></i></div>
+                                    <div>
+                                        <h2>Trợ lý NotebookLM AI Hub</h2>
+                                        <p>Đọc, giải thích, tóm tắt và thực hiện Q&A dựa trên chính cơ sở dữ liệu Personal Hub của bạn</p>
+                                    </div>
+                                </div>
+                                <a href="https://notebooklm.google/" target="_blank" class="btn btn-google-ai">
+                                    <i data-lucide="external-link"></i> Mở NotebookLM
+                                </a>
+                            </div>
+                            <div class="notebooklm-body-grid">
+                                <div class="notebooklm-guide">
+                                    <h3>💡 Cách liên kết dữ liệu với NotebookLM:</h3>
+                                    <ol class="step-list">
+                                        <li>
+                                            <strong>Kết nối Trang tính Google Drive:</strong> Bạn đã cấu hình đồng bộ hóa dữ liệu lên Google Sheets. Tệp trang tính của bạn chính là nguồn dữ liệu thời gian thực.
+                                        </li>
+                                        <li>
+                                            <strong>Nạp nguồn trong NotebookLM:</strong> Trong không gian làm việc của NotebookLM, nhấn **"Add Source" (Thêm nguồn)** -> chọn **"Google Sheets"** -> tìm đúng tệp Google Sheet của dự án.
+                                        </li>
+                                        <li>
+                                            <strong>Bắt đầu đặt câu hỏi:</strong> Bạn có thể hỏi những câu cực kỳ chi tiết như: <i>"Tôi có những khoản nợ nào sắp hết hạn?", "Hãy lập kế hoạch tài chính trả nợ dựa trên thu nhập tháng này của tôi", "Tóm tắt các ghi chú công việc tôi đã lưu"</i>.
+                                        </li>
+                                    </ol>
+                                </div>
+                                <div class="notebooklm-actions-card">
+                                    <h3>📋 Biên tập & Xuất dữ liệu nhanh cho AI:</h3>
+                                    <p>Tự động tổng hợp và định dạng toàn bộ cơ sở dữ liệu của bạn thành tài liệu văn bản chuẩn hóa để gửi trực tiếp cho NotebookLM.</p>
+                                    <button class="btn btn-primary-glow w-100" id="btn-export-notebooklm">
+                                        <i data-lucide="file-text"></i> Sao chép Dữ liệu Hub cho NotebookLM
+                                    </button>
+                                    <span class="export-note">Sau khi nhấn, dữ liệu đã tối ưu hóa cho AI sẽ nằm trong Clipboard của bạn, chỉ cần dán (Ctrl+V) vào ô Thêm nguồn văn bản của NotebookLM.</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="storage-columns-grid">
+                            
+                            <!-- Cột Kho Lưu Trữ Tài Liệu Tài Khoản -->
+                            <div class="glass-card">
+                                <div class="card-header">
+                                    <h2>Kho lưu trữ tài liệu công việc</h2>
+                                    <i data-lucide="folder"></i>
+                                </div>
+                                <div class="storage-box">
+                                    <div class="storage-upload-zone" id="storage-drop-zone">
+                                        <i data-lucide="upload-cloud"></i>
+                                        <p>Nhấp hoặc kéo thả tài liệu để lưu trữ</p>
+                                        <input type="file" id="storage-file-input" class="hidden-file-input" multiple>
+                                    </div>
+                                    <div class="storage-files-list" id="storage-files-container">
+                                        <!-- Danh sách file bằng JS -->
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Cột Mẹo Lưu Trữ Thông Minh -->
+                            <div class="glass-card">
+                                <div class="card-header gradient-header-blue">
+                                    <h2>Mẹo Lưu Trữ & Quản Lý Hồ Sơ</h2>
+                                    <i data-lucide="sparkles"></i>
+                                </div>
+                                <div class="tips-container" id="tips-container-list">
+                                    <!-- Các mẹo lưu trữ bằng JS -->
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 6. TAB CÀI ĐẶT -->
+                <section class="tab-panel" id="tab-settings">
+                    <div class="settings-grid-layout">
+                        
+                        <!-- Cài đặt Google Sheet Sync -->
+                        <div class="glass-card">
+                            <div class="card-header gradient-header-blue">
+                                <h2>Cấu hình đồng bộ Google Sheets</h2>
+                                <i data-lucide="database"></i>
+                            </div>
+                            <div class="card-body form-layout">
+                                <p class="settings-desc">Liên kết cơ sở dữ liệu của bạn trực tiếp với Google Sheets của Google Drive để bảo vệ dữ liệu đám mây và đồng bộ trên nhiều thiết bị.</p>
+                                
+                                <div class="form-group">
+                                    <label for="settings-sheet-url">Đường dẫn Google Sheet của bạn</label>
+                                    <input type="text" id="settings-sheet-url" class="form-input" placeholder="https://docs.google.com/spreadsheets/d/..." value="https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit?gid=0#gid=0" readonly>
+                                    <span class="input-tip">Hệ thống đã nhận diện được link Google Sheet của bạn làm database chính.</span>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="settings-web-app-url">Đường dẫn API Web App (Google Apps Script URL)</label>
+                                    <input type="text" id="settings-web-app-url" class="form-input-highlight" placeholder="Dán link https://script.google.com/macros/s/... vào đây">
+                                    <span class="input-tip">Bạn cần lấy link này sau khi triển khai Apps Script (xem tài liệu hướng dẫn bên phải).</span>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="settings-sync-token">Mã bảo mật Token đồng bộ</label>
+                                    <input type="password" id="settings-sync-token" class="form-input" value="PersonalManagerHub2026">
+                                    <span class="input-tip">Phải khớp hoàn toàn với biến `SECURITY_TOKEN` đã khai báo trong tệp Apps Script của bạn.</span>
+                                </div>
+
+                                <div class="settings-actions">
+                                    <button class="btn btn-secondary" id="btn-test-connection">
+                                        <i data-lucide="link-2"></i> Kiểm tra kết nối
+                                    </button>
+                                    <button class="btn btn-primary-glow" id="btn-save-settings">
+                                        <i data-lucide="save"></i> Lưu cấu hình & Đồng bộ
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Cài đặt Mật khẩu chủ & Dữ liệu Cục bộ -->
+                        <div class="glass-card">
+                            <div class="card-header gradient-header-coral">
+                                <h2>Cài đặt Bảo mật & Dữ liệu cục bộ</h2>
+                                <i data-lucide="lock"></i>
+                            </div>
+                            <div class="card-body form-layout">
+                                <div class="form-group">
+                                    <label for="settings-change-password">Thay đổi Mật khẩu mở khóa Hub</label>
+                                    <input type="password" id="settings-change-password" class="form-input" placeholder="Nhập mật khẩu mới...">
+                                    <button class="btn btn-secondary mt-2" id="btn-change-password">Đổi mật khẩu</button>
+                                </div>
+                                
+                                <div class="danger-zone">
+                                    <h3>Vùng rủi ro (Danger Zone)</h3>
+                                    <p>Các hành động dưới đây sẽ xóa sạch hoặc ghi đè toàn bộ cơ sở dữ liệu cục bộ.</p>
+                                    <div class="danger-actions-row">
+                                        <button class="btn btn-danger" id="btn-clear-local-data">
+                                            <i data-lucide="trash-2"></i> Xóa toàn bộ dữ liệu cục bộ
+                                        </button>
+                                        <button class="btn btn-secondary" id="btn-backup-local-data">
+                                            <i data-lucide="download"></i> Xuất dữ liệu sao lưu (JSON)
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Hướng dẫn chi tiết từng bước dán Apps Script (Cột lớn chiếm full chiều rộng ở dưới) -->
+                        <div class="glass-card col-span-2">
+                            <div class="card-header">
+                                <h2>Tài liệu hướng dẫn thiết lập Google Sheets Sync trong 2 phút</h2>
+                                <i data-lucide="book-open"></i>
+                            </div>
+                            <div class="guide-scrollable-body">
+                                <div class="guide-steps-grid">
+                                    <div class="guide-step-card">
+                                        <span class="step-num">1</span>
+                                        <h4>Mở Google Sheet</h4>
+                                        <p>Truy cập vào trang tính Google Sheet đã tạo sẵn của bạn.</p>
+                                    </div>
+                                    <div class="guide-step-card">
+                                        <span class="step-num">2</span>
+                                        <h4>Mở Apps Script</h4>
+                                        <p>Nhấp chọn <strong>Tiện ích mở rộng (Extensions)</strong> -> <strong>Apps Script</strong>.</p>
+                                    </div>
+                                    <div class="guide-step-card">
+                                        <span class="step-num">3</span>
+                                        <h4>Dán Mã Script</h4>
+                                        <p>Xóa sạch các ký tự mặc định trong file `Code.gs`, sao chép toàn bộ nội dung trong tệp `google-apps-script.js` ở thư mục dự án và dán vào đó.</p>
+                                    </div>
+                                    <div class="guide-step-card">
+                                        <span class="step-num">4</span>
+                                        <h4>Nhấn Triển khai (Deploy)</h4>
+                                        <p>Nhấn <strong>Triển khai (Deploy)</strong> -> <strong>Triển khai mới</strong>. Chọn loại là <strong>Ứng dụng web (Web App)</strong>. Đặt cấu hình "Ai có quyền truy cập" là <strong>Bất kỳ ai (Anyone)</strong>. Nhấn Deploy.</p>
+                                    </div>
+                                </div>
+                                <div class="code-box-header">
+                                    <span>Mã nguồn Google Apps Script (Hãy Copy mã này)</span>
+                                    <button class="btn btn-copy-code" id="btn-copy-apps-script">
+                                        <i data-lucide="copy"></i> Copy Mã Script
+                                    </button>
+                                </div>
+                                <pre class="code-block" id="apps-script-code-display">
+                                    <!-- Sẽ được hiển thị bằng JS -->
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+        
+        <!-- THANH BOTTOM NAV BAR (CHỈ HIỂN THỊ TRÊN DI ĐỘNG/IPAD DỌC) -->
+        <nav class="bottom-nav glass">
+            <div class="bottom-nav-item active" data-tab="dashboard">
+                <i data-lucide="layout-dashboard"></i>
+                <span>Tổng quan</span>
+            </div>
+            <div class="bottom-nav-item" data-tab="income">
+                <i data-lucide="trending-up"></i>
+                <span>Thu Chi</span>
+            </div>
+            <div class="bottom-nav-item" data-tab="debts">
+                <i data-lucide="credit-card"></i>
+                <span>Nợ</span>
+            </div>
+            <div class="bottom-nav-item" data-tab="goals">
+                <i data-lucide="compass"></i>
+                <span>Kế hoạch</span>
+            </div>
+            <div class="bottom-nav-item" data-tab="workspace">
+                <i data-lucide="briefcase"></i>
+                <span>Công việc</span>
+            </div>
+            <div class="bottom-nav-item" data-tab="settings">
+                <i data-lucide="settings"></i>
+                <span>Cài đặt</span>
+            </div>
+        </nav>
+    </div>
+
+    <!-- ==================== CÁC MODAL HỘP THOẠI (MODAL DIALOGS) ==================== -->
+
+    <!-- A. MODAL THÊM/SỬA KHOẢN NỢ -->
+    <div id="modal-debt" class="modal-container hidden">
+        <div class="modal-card glass">
+            <div class="modal-header">
+                <h2 id="debt-modal-title">Ghi nhận khoản nợ mới</h2>
+                <button class="btn-close-modal" onclick="closeModal('modal-debt')"><i data-lucide="x"></i></button>
+            </div>
+            <form id="debt-form" class="form-layout">
+                <input type="hidden" id="debt-id">
+                <div class="form-group">
+                    <label for="debt-creditor">Chủ nợ / Người nợ</label>
+                    <input type="text" id="debt-creditor" class="form-input" placeholder="Ví dụ: Nguyễn Văn A..." required>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label for="debt-type">Loại khoản nợ</label>
+                        <select id="debt-type" class="form-input" required>
+                            <option value="owe_others" selected>Tôi nợ (Nợ phải trả)</option>
+                            <option value="others_owe">Họ nợ tôi (Cho vay)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="debt-interest">Lãi suất năm (%)</label>
+                        <input type="number" id="debt-interest" class="form-input" value="0" step="0.1">
+                    </div>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label for="debt-amount">Số tiền nợ (₫)</label>
+                        <input type="number" id="debt-amount" class="form-input-highlight" placeholder="Nhập số tiền..." required>
+                    </div>
+                    <div class="form-group">
+                        <label for="debt-due-date">Hạn thanh toán</label>
+                        <input type="date" id="debt-due-date" class="form-input" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="debt-status">Trạng thái khoản nợ</label>
+                    <select id="debt-status" class="form-input" required>
+                        <option value="active" selected>Đang hoạt động</option>
+                        <option value="paid">Đã trả hết</option>
+                        <option value="overdue">Đã trễ hạn</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('modal-debt')">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Lưu khoản nợ</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- B. MODAL THÊM LƯỢT THANH TOÁN NỢ (RECORD REPAYMENT) -->
+    <div id="modal-repayment" class="modal-container hidden">
+        <div class="modal-card glass">
+            <div class="modal-header">
+                <h2>Cập nhật đợt trả nợ</h2>
+                <button class="btn-close-modal" onclick="closeModal('modal-repayment')"><i data-lucide="x"></i></button>
+            </div>
+            <form id="repayment-form" class="form-layout">
+                <input type="hidden" id="repayment-debt-id">
+                <div class="form-group">
+                    <p class="debt-summary-text" id="repayment-debt-summary">Đang trả cho khoản nợ của...</p>
+                </div>
+                <div class="form-group">
+                    <label for="repayment-amount">Số tiền thanh toán đợt này (₫)</label>
+                    <input type="number" id="repayment-amount" class="form-input-highlight" placeholder="Nhập số tiền trả..." required>
+                </div>
+                <div class="form-group">
+                    <label for="repayment-date">Ngày thanh toán</label>
+                    <input type="date" id="repayment-date" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-row">
+                        <input type="checkbox" id="repayment-auto-transaction" checked>
+                        <label for="repayment-auto-transaction">Tự động ghi nhận khoản chi này vào bảng Thu & Chi</label>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('modal-repayment')">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Xác nhận thanh toán</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- C. MODAL THÊM/SỬA KẾ HOẠCH MỤC TIÊU -->
+    <div id="modal-goal" class="modal-container hidden">
+        <div class="modal-card glass">
+            <div class="modal-header">
+                <h2 id="goal-modal-title">Thêm mục tiêu mới</h2>
+                <button class="btn-close-modal" onclick="closeModal('modal-goal')"><i data-lucide="x"></i></button>
+            </div>
+            <form id="goal-form" class="form-layout">
+                <input type="hidden" id="goal-id">
+                <div class="form-group">
+                    <label for="goal-title">Tên mục tiêu kế hoạch</label>
+                    <input type="text" id="goal-title" class="form-input" placeholder="Ví dụ: Mua laptop mới, Tiết kiệm 50 triệu..." required>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label for="goal-timeframe">Thời hạn mục tiêu</label>
+                        <select id="goal-timeframe" class="form-input" required>
+                            <option value="short" selected>Ngắn hạn (1-12 tháng)</option>
+                            <option value="medium">Trung hạn (1-3 năm)</option>
+                            <option value="long">Dài hạn (Trên 3 năm)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="goal-due-date">Hạn đạt mục tiêu</label>
+                        <input type="date" id="goal-due-date" class="form-input" required>
+                    </div>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label for="goal-target-amount">Số tiền cần tích lũy (₫) <span class="input-optional">(Tùy chọn)</span></label>
+                        <input type="number" id="goal-target-amount" class="form-input" placeholder="Nhập số tiền..." value="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="goal-current-amount">Số tiền hiện có (₫)</label>
+                        <input type="number" id="goal-current-amount" class="form-input" value="0">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="goal-milestones-input">Các mốc quan trọng (Milestones) <span class="input-optional">(Ngăn cách bằng dấu phẩy)</span></label>
+                    <textarea id="goal-milestones-input" class="form-input" placeholder="Ví dụ: Lên danh sách linh kiện, Chọn cửa hàng uy tín, Đủ tiền cọc..." rows="3"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('modal-goal')">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Lưu mục tiêu</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- D. MODAL THÊM/SỬA NHIỆM VỤ KANBAN -->
+    <div id="modal-task" class="modal-container hidden">
+        <div class="modal-card glass">
+            <div class="modal-header">
+                <h2 id="task-modal-title">Tạo nhiệm vụ mới</h2>
+                <button class="btn-close-modal" onclick="closeModal('modal-task')"><i data-lucide="x"></i></button>
+            </div>
+            <form id="task-form" class="form-layout">
+                <input type="hidden" id="task-id">
+                <div class="form-group">
+                    <label for="task-title">Tên nhiệm vụ</label>
+                    <input type="text" id="task-title" class="form-input" placeholder="Nhập tên nhiệm vụ cần làm..." required>
+                </div>
+                <div class="form-group">
+                    <label for="task-desc">Chi tiết công việc</label>
+                    <textarea id="task-desc" class="form-input" placeholder="Nhập mô tả chi tiết công việc..." rows="3"></textarea>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label for="task-status">Trạng thái ban đầu</label>
+                        <select id="task-status" class="form-input" required>
+                            <option value="todo" selected>Cần làm</option>
+                            <option value="inprogress">Đang làm</option>
+                            <option value="review">Kiểm tra</option>
+                            <option value="done">Đã xong</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="task-priority">Độ ưu tiên</label>
+                        <select id="task-priority" class="form-input" required>
+                            <option value="low">Thấp</option>
+                            <option value="medium" selected>Trung bình</option>
+                            <option value="high">Cao</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="task-due-date">Hạn hoàn thành</label>
+                    <input type="date" id="task-due-date" class="form-input" required>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('modal-task')">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Lưu công việc</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Script điều khiển Logic -->
+    <script src="app.js"></script>
+</body>
+</html>
