@@ -49,6 +49,22 @@ function safeCreateIcons() {
 
 // ==================== KHỞI ĐỘNG ỨNG DỤNG (ENTRY POINT) ====================
 document.addEventListener("DOMContentLoaded", () => {
+    // 0. Tự động kiểm tra và cấu hình URL Google Sheets từ Biến môi trường Vercel (Vite)
+    try {
+        if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL) {
+            const envUrl = import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL;
+            if (envUrl && envUrl.startsWith("https://script.google.com/macros/s/")) {
+                appState.settings.webAppUrl = envUrl;
+                if (derivedKey) {
+                    saveStateToLocalStorage();
+                }
+                console.log("Đã tự động cấu hình URL Google Sheets từ Biến môi trường Vercel!");
+            }
+        }
+    } catch (e) {
+        console.warn("Không đọc được biến môi trường VITE_GOOGLE_APPS_SCRIPT_URL: ", e.message);
+    }
+
     // 1. Kiểm tra xem thư viện mã hóa bảo mật CryptoJS đã được tải qua CDN chưa
     if (typeof CryptoJS === 'undefined') {
         const formContainer = document.getElementById("lock-form-container");
