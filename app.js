@@ -828,7 +828,7 @@ function openRepaymentModal(debtId) {
     document.getElementById("repayment-debt-id").value = debt.id;
     
     // Tính tổng đã trả trước đó để hiển thị
-    const totalPaid = debt.repayments.reduce((sum, r) => sum + r.amount, 0);
+    const totalPaid = debt.repayments ? debt.repayments.reduce((sum, r) => sum + r.amount, 0) : 0;
     const remaining = debt.amount - totalPaid;
     
     document.getElementById("repayment-debt-summary").innerHTML = `
@@ -840,6 +840,38 @@ function openRepaymentModal(debtId) {
     
     document.getElementById("repayment-amount").value = remaining;
     document.getElementById("repayment-date").value = new Date().toISOString().split('T')[0];
+    
+    // Hiển thị danh sách lịch sử trả nợ chia nhỏ từng đợt
+    const historyList = document.getElementById("repayment-history-list");
+    if (historyList) {
+        historyList.innerHTML = "";
+        const reps = debt.repayments || [];
+        
+        if (reps.length === 0) {
+            historyList.innerHTML = `<p class="empty-text" style="font-size: 11px; margin: 0;">Chưa có đợt thanh toán nào.</p>`;
+        } else {
+            reps.forEach((r, idx) => {
+                const item = document.createElement("div");
+                item.className = "file-item"; // Tái sử dụng class CSS file-item cực đẹp sẵn có
+                item.style.padding = "6px 10px";
+                item.style.display = "flex";
+                item.style.justifyContent = "space-between";
+                item.style.alignItems = "center";
+                item.style.background = "rgba(255,255,255,0.02)";
+                item.style.borderRadius = "6px";
+                item.style.border = "1px solid rgba(255,255,255,0.04)";
+                
+                item.innerHTML = `
+                    <div style="text-align: left;">
+                        <span style="font-size: 12px; font-weight: 600; color: var(--text-main);">Đợt ${idx + 1}: +${r.amount.toLocaleString('vi-VN')} ₫</span>
+                        <p style="margin: 0; font-size: 10px; color: var(--text-muted);">Ngày: ${r.date}</p>
+                    </div>
+                    <button type="button" class="btn-action-small btn-delete" onclick="deleteRepayment('${debt.id}', '${r.id}')" title="Xóa đợt thanh toán này"><i data-lucide="trash-2" style="width: 12px; height: 12px;"></i></button>
+                `;
+                historyList.appendChild(item);
+            });
+        }
+    }
     
     openModal("modal-repayment");
 }
@@ -897,6 +929,30 @@ function handleSaveRepayment(e) {
     closeModal("modal-repayment");
     renderAllViews();
     alert("Cập nhật thanh toán đợt thành công!");
+}
+
+// Xóa đợt thanh toán nợ chia nhỏ từng đợt
+function deleteRepayment(debtId, repaymentId) {
+    if (confirm("Bạn có chắc chắn muốn xóa đợt thanh toán này?")) {
+        const debtIdx = appState.debts.findIndex(d => d.id === debtId);
+        if (debtIdx === -1) return;
+        
+        const debt = appState.debts[debtIdx];
+        debt.repayments = debt.repayments.filter(r => r.id !== repaymentId);
+        
+        // Khôi phục trạng thái active nếu dư nợ chưa trả hết
+        const totalPaid = debt.repayments.reduce((sum, r) => sum + r.amount, 0);
+        if (totalPaid < debt.amount) {
+            debt.status = "active";
+        }
+        
+        saveStateToLocalStorage();
+        triggerAutoSync();
+        renderAllViews();
+        
+        // Cập nhật lại giao diện modal hiện tại
+        openRepaymentModal(debtId);
+    }
 }
 
 // ==================== G. LOGIC KẾ HOẠCH & MỤC TIÊU (FUTURE GOALS) ====================
@@ -1037,6 +1093,28 @@ function dropTask(ev, destStatus) {
         triggerAutoSync();
         renderAllViews();
     }
+}
+
+// Di chuyển trạng thái công việc (dành cho di động không kéo thả được)
+function moveTask(taskId, direction) {
+    const taskIdx = appState.tasks.findIndex(t => t.id === taskId);
+    if (taskIdx === -1) return;
+    
+    const task = appState.tasks[taskIdx];
+    const statuses = ["todo", "inprogress", "review", "done"];
+    const currentIdx = statuses.indexOf(task.status);
+    
+    if (direction === "next" && currentIdx < statuses.length - 1) {
+        task.status = statuses[currentIdx + 1];
+    } else if (direction === "prev" && currentIdx > 0) {
+        task.status = statuses[currentIdx - 1];
+    } else {
+        return;
+    }
+    
+    saveStateToLocalStorage();
+    triggerAutoSync();
+    renderAllViews();
 }
 
 // --- 2. GHI CHÚ LOGIC ---
@@ -2109,6 +2187,9 @@ function renderWorkspaceTasksView() {
                     <span>${t.dueDate}</span>
                 </div>
                 <div class="debt-card-actions">
+                    <button class="btn-action-small" onclick="moveTask('${t.id}', 'prev')" title="Chuyển về cột trước" ${t.status === 'todo' ? 'disabled style="opacity:0.25; pointer-events:none;"' : ''}><i data-lucide="arrow-left"></i></button>
+                    <button class="btn-action-small" onclick="moveTask('${t.id}', 'next')" title="Chuyển sang cột sau" ${t.status === 'done' ? 'disabled style="opacity:0.25; pointer-events:none;"' : ''}><i data-lucide="arrow-right"></i></button>
+                    <span style="border-left: 1px solid rgba(255,255,255,0.08); margin: 0 4px; height: 14px; display: inline-block; vertical-align: middle;"></span>
                     <button class="btn-action-small" onclick="handleEditTask('${t.id}')" title="Sửa công việc"><i data-lucide="edit-2"></i></button>
                     <button class="btn-action-small btn-delete" onclick="handleDeleteTask('${t.id}')" title="Xóa công việc"><i data-lucide="trash-2"></i></button>
                 </div>
@@ -2508,6 +2589,8 @@ window.handleDeleteTransaction = handleDeleteTransaction;
 window.handleEditDebt = handleEditDebt;
 window.handleDeleteDebt = handleDeleteDebt;
 window.openRepaymentModal = openRepaymentModal;
+window.deleteRepayment = deleteRepayment;
+window.moveTask = moveTask;
 window.handleEditGoal = handleEditGoal;
 window.handleDeleteGoal = handleDeleteGoal;
 window.toggleMilestone = toggleMilestone;
