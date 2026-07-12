@@ -2061,3 +2061,124 @@ select option {
     }
 }
 
+/* ==================== CẤU HÌNH THỜI THƯỢNG HẠN MỨC CHI TIÊU (SPENDING LIMITS WIDGET) ==================== */
+.spending-limits-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.spending-limit-card {
+    position: relative;
+    padding: 16px;
+    border-radius: var(--radius-md);
+    background: var(--bg-card-glass);
+    border: 1px solid var(--border-glass);
+    overflow: hidden;
+    transition: var(--transition-smooth);
+}
+
+.spending-limit-card:hover {
+    border-color: var(--border-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-soft);
+}
+
+.spending-limit-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.spending-limit-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.spending-limit-value {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+.limit-progress-bar {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+}
+
+.limit-progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 4px;
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.limit-progress-fill.safe {
+    background: linear-gradient(90deg, var(--color-emerald), hsl(145, 80%, 55%));
+    box-shadow: 0 0 10px hsla(145, 80%, 42%, 0.3);
+}
+
+.limit-progress-fill.warning {
+    background: linear-gradient(90deg, var(--color-yellow), hsl(45, 95%, 60%));
+    box-shadow: 0 0 12px rgba(250, 204, 21, 0.4);
+}
+
+.limit-progress-fill.danger-glow {
+    background: linear-gradient(90deg, var(--color-coral), hsl(355, 85%, 70%));
+    box-shadow: 0 0 16px rgba(255, 77, 77, 0.6);
+    animation: danger-blink 1s infinite alternate;
+}
+
+@keyframes danger-blink {
+    0% {
+        opacity: 0.8;
+        box-shadow: 0 0 8px rgba(255, 77, 77, 0.4);
+    }
+    100% {
+        opacity: 1;
+        box-shadow: 0 0 20px rgba(255, 77, 77, 0.8);
+    }
+}
+
+/* ==================== iOS RESPONSIVE OPTIMIZATIONS (IPHONE/IPAD) ==================== */
+@media (max-width: 768px) {
+    /* Tránh iOS tự động thu phóng chữ trong ô nhập liệu */
+    input, select, textarea {
+        font-size: 16px !important;
+    }
+    
+    /* Khoảng đệm an toàn iOS Bottom Safe Area cho PWA/Mobile Safari */
+    .bottom-nav {
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+        height: auto;
+        min-height: 64px;
+    }
+    
+    /* Điều chỉnh các bảng cuộn ngang trên điện thoại */
+    .table-container {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Giao diện biểu đồ và widgets tối ưu diện tích */
+    .spending-limits-container {
+        grid-template-columns: 1fr;
+    }
+    
+    /* Tối ưu hóa margin và padding cho các card */
+    .glass-card {
+        padding: 16px !important;
+    }
+}
+

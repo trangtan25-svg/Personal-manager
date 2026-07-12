@@ -23,7 +23,7 @@ const SECURITY_TOKEN = "PersonalManagerHub2026";
 // Cấu trúc các bảng và tiêu đề cột tương ứng
 const SCHEMAS = {
   "Thu_Nhap": ["ID", "Amount", "Category", "Date", "Notes", "Type"],
-  "Khoan_No": ["ID", "Creditor", "Amount", "Type", "InterestRate", "DueDate", "Status", "Repayments", "InstallmentsCount", "InstallmentAmount"],
+  "Khoan_No": ["ID", "Creditor", "Amount", "Type", "InterestRate", "DueDate", "Status", "Repayments", "StatementDay", "DueDay"],
   "Ke_Hoach": ["ID", "Title", "TargetAmount", "CurrentAmount", "DueDate", "Timeframe", "Milestones", "Savings", "InstallmentsCount", "InstallmentAmount"],
   "Cong_Viec": ["ID", "Title", "Description", "Status", "DueDate", "Priority"],
   "Ghi_Chu": ["ID", "Title", "Content", "CreatedAt"],
@@ -36,6 +36,15 @@ function onOpen() {
   ui.createMenu('🤖 Personal Hub AI')
     .addItem('✨ Khởi tạo cấu trúc các bảng', 'initializeDatabase')
     .addToUi();
+}
+
+// Tự động kích hoạt khi người dùng chỉnh sửa trực tiếp trên Google Sheets
+function onEdit(e) {
+  try {
+    PropertiesService.getScriptProperties().setProperty('db_revision', Date.now().toString());
+  } catch (err) {
+    console.error("Lỗi onEdit: " + err.toString());
+  }
 }
 
 // Hàm khởi tạo toàn bộ cấu trúc cơ sở dữ liệu trên Google Sheets với định dạng chuyên nghiệp
@@ -119,6 +128,13 @@ function doGet(e) {
     }
     
     console.log("Xác thực Token thành công!");
+    
+    // Kiểm tra nhanh revision của cơ sở dữ liệu để đồng bộ thời gian thực siêu tốc
+    if (params.action === "check_revision") {
+      const serverRevision = PropertiesService.getScriptProperties().getProperty('db_revision') || "0";
+      return createJsonResponse({ success: true, revision: serverRevision });
+    }
+    
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     if (!ss) {
       console.error("LỖI: Không tìm thấy Spreadsheet hoạt động! Hãy đảm bảo script được gắn liền (Container-Bound) với Google Sheet.");
@@ -161,7 +177,8 @@ function doGet(e) {
     });
     
     console.log("=== TẢI DỮ LIỆU HOÀN THÀNH THÀNH CÔNG ===");
-    return createJsonResponse({ success: true, data: data });
+    const serverRevision = PropertiesService.getScriptProperties().getProperty('db_revision') || "0";
+    return createJsonResponse({ success: true, data: data, revision: serverRevision });
   } catch (err) {
     console.error("LỖI NGOẠI LỆ TRONG doGet: " + err.toString());
     return createJsonResponse({ success: false, error: err.toString() }, 500);
@@ -321,9 +338,12 @@ function doPost(e) {
     });
     
     console.log("=== ĐỒNG BỘ DỮ LIỆU HOÀN THÀNH THÀNH CÔNG ===");
+    PropertiesService.getScriptProperties().setProperty('db_revision', Date.now().toString());
+    const serverRevision = PropertiesService.getScriptProperties().getProperty('db_revision') || "0";
     return createJsonResponse({ 
       success: true, 
       message: "Sync successfully!",
+      revision: serverRevision,
       spreadsheetName: ss.getName(),
       spreadsheetId: ss.getId(),
       spreadsheetUrl: ss.getUrl()

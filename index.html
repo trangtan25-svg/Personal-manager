@@ -2,6 +2,19 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
+    <script>
+        // Ép buộc dọn dẹp cache cũ khi nâng cấp
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(regs => {
+                regs.forEach(reg => reg.unregister());
+            });
+        }
+        if (typeof caches !== 'undefined') {
+            caches.keys().then(keys => {
+                keys.forEach(key => caches.delete(key));
+            });
+        }
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Personal Manager Hub - Quản lý Tài chính, Công việc & Kế hoạch Cá nhân</title>
     
@@ -89,8 +102,8 @@
                         <span>Kế hoạch</span>
                     </li>
                     <li class="nav-item" data-tab="workspace">
-                        <i data-lucide="briefcase"></i>
-                        <span>Công việc</span>
+                        <i data-lucide="sticky-note"></i>
+                        <span>Sổ tay</span>
                     </li>
                     <li class="nav-item" data-tab="settings">
                         <i data-lucide="settings"></i>
@@ -183,6 +196,46 @@
                             </div>
                             <div class="chart-wrapper">
                                 <canvas id="chart-expense-categories"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Widget Hạn mức Chi tiêu -->
+                    <div class="spending-limits-section glass-card" style="margin-bottom: 24px;">
+                        <div class="card-header">
+                            <h2>Hạn mức Chi tiêu Cá nhân</h2>
+                            <i data-lucide="gauge"></i>
+                        </div>
+                        <div class="spending-limits-grid">
+                            <!-- Limit Day -->
+                            <div class="limit-bar-wrapper">
+                                <div class="limit-info">
+                                    <span class="limit-label"><i data-lucide="calendar"></i> Hôm nay (Ngày)</span>
+                                    <span class="limit-values" id="limit-val-daily">0 / 0 ₫</span>
+                                </div>
+                                <div class="limit-progress-bg">
+                                    <div class="limit-progress-fill" id="limit-fill-daily" style="width: 0%;"></div>
+                                </div>
+                            </div>
+                            <!-- Limit Week -->
+                            <div class="limit-bar-wrapper">
+                                <div class="limit-info">
+                                    <span class="limit-label"><i data-lucide="calendar-range"></i> Tuần này</span>
+                                    <span class="limit-values" id="limit-val-weekly">0 / 0 ₫</span>
+                                </div>
+                                <div class="limit-progress-bg">
+                                    <div class="limit-progress-fill" id="limit-fill-weekly" style="width: 0%;"></div>
+                                </div>
+                            </div>
+                            <!-- Limit Month -->
+                            <div class="limit-bar-wrapper">
+                                <div class="limit-info">
+                                    <span class="limit-label"><i data-lucide="calendar-days"></i> Tháng này</span>
+                                    <span class="limit-values" id="limit-val-monthly">0 / 0 ₫</span>
+                                </div>
+                                <div class="limit-progress-bg">
+                                    <div class="limit-progress-fill" id="limit-fill-monthly" style="width: 0%;"></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -376,11 +429,11 @@
                     
                     <!-- MENU PHÂN HỆ WORKSPACE -->
                     <div class="workspace-sub-tabs glass">
-                        <button class="w-sub-tab active" data-workspace-section="kanban">
-                            <i data-lucide="kanban"></i> Bảng Kanban
-                        </button>
-                        <button class="w-sub-tab" data-workspace-section="notes">
+                        <button class="w-sub-tab active" data-workspace-section="notes">
                             <i data-lucide="sticky-note"></i> Sổ tay Ghi chú
+                        </button>
+                        <button class="w-sub-tab" data-workspace-section="kanban">
+                            <i data-lucide="kanban"></i> Bảng Nhiệm vụ
                         </button>
                         <button class="w-sub-tab" data-workspace-section="storage">
                             <i data-lucide="folder-open"></i> Lưu trữ & Mẹo hay
@@ -388,7 +441,7 @@
                     </div>
 
                     <!-- PHÂN HỆ A: BẢNG KANBAN -->
-                    <div class="workspace-panel active" id="w-panel-kanban">
+                    <div class="workspace-panel" id="w-panel-kanban">
                         <div class="kanban-header-bar">
                             <h2>Bảng quản lý công việc</h2>
                             <button class="btn btn-primary" id="btn-add-task-modal">
@@ -448,7 +501,7 @@
                     </div>
 
                     <!-- PHÂN HỆ B: SỔ TAY GHI CHÚ -->
-                    <div class="workspace-panel" id="w-panel-notes">
+                    <div class="workspace-panel active" id="w-panel-notes">
                         <div class="panel-layout-split">
                             <div class="split-sidebar">
                                 <div class="glass-card">
@@ -464,7 +517,11 @@
                                         </div>
                                         <div class="form-group">
                                             <label for="note-content">Nội dung</label>
-                                            <textarea id="note-content" class="form-input" placeholder="Nhập nội dung ý tưởng, kế hoạch..." rows="8" required></textarea>
+                                            <textarea id="note-content" class="form-input" placeholder="Nhập nội dung ý tưởng, kế hoạch..." rows="6" required></textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="note-reminder-at">Hẹn giờ nhắc nhở <span class="input-optional">(Tùy chọn)</span></label>
+                                            <input type="datetime-local" id="note-reminder-at" class="form-input">
                                         </div>
                                         <div class="form-actions">
                                             <button type="button" class="btn btn-secondary" id="btn-reset-note">Hủy</button>
@@ -584,6 +641,36 @@
                             </div>
                         </div>
 
+                        <!-- Cấu hình Hạn mức Chi tiêu -->
+                        <div class="glass-card">
+                            <div class="card-header gradient-header-emerald">
+                                <h2>Hạn mức Chi tiêu Cá nhân</h2>
+                                <i data-lucide="gauge"></i>
+                            </div>
+                            <div class="card-body form-layout">
+                                <p class="settings-desc">Thiết lập hạn mức chi tiêu tối đa hàng ngày, hàng tuần và hàng tháng để kiểm soát tài chính tốt hơn. Nhập 0 nếu không giới hạn.</p>
+                                
+                                <div class="form-group">
+                                    <label for="settings-limit-daily">Hạn mức chi tiêu ngày tối đa (₫)</label>
+                                    <input type="number" id="settings-limit-daily" class="form-input" placeholder="Ví dụ: 200000" min="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="settings-limit-weekly">Hạn mức chi tiêu tuần tối đa (₫)</label>
+                                    <input type="number" id="settings-limit-weekly" class="form-input" placeholder="Ví dụ: 1500000" min="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="settings-limit-monthly">Hạn mức chi tiêu tháng tối đa (₫)</label>
+                                    <input type="number" id="settings-limit-monthly" class="form-input" placeholder="Ví dụ: 6000000" min="0">
+                                </div>
+                                
+                                <div class="settings-actions">
+                                    <button class="btn btn-primary-glow" id="btn-save-limits">
+                                        <i data-lucide="save"></i> Lưu hạn mức chi tiêu
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Cài đặt Mật khẩu chủ & Dữ liệu Cục bộ -->
                         <div class="glass-card">
                             <div class="card-header gradient-header-coral">
@@ -677,8 +764,8 @@
                 <span>Kế hoạch</span>
             </div>
             <div class="bottom-nav-item" data-tab="workspace">
-                <i data-lucide="briefcase"></i>
-                <span>Công việc</span>
+                <i data-lucide="sticky-note"></i>
+                <span>Sổ tay</span>
             </div>
             <div class="bottom-nav-item" data-tab="settings">
                 <i data-lucide="settings"></i>
@@ -717,12 +804,78 @@
                 </div>
                 <div class="form-group-row">
                     <div class="form-group">
-                        <label for="debt-installments-count">Số đợt trả nợ <span class="input-optional">(Tùy chọn)</span></label>
-                        <input type="number" id="debt-installments-count" class="form-input" placeholder="Ví dụ: 12 đợt..." min="0">
+                        <label for="debt-statement-day">Ngày sao kê hằng tháng <span class="input-optional">(Tùy chọn)</span></label>
+                        <select id="debt-statement-day" class="form-input">
+                            <option value="">Không có</option>
+                            <option value="1">Ngày 1</option>
+                            <option value="2">Ngày 2</option>
+                            <option value="3">Ngày 3</option>
+                            <option value="4">Ngày 4</option>
+                            <option value="5">Ngày 5</option>
+                            <option value="6">Ngày 6</option>
+                            <option value="7">Ngày 7</option>
+                            <option value="8">Ngày 8</option>
+                            <option value="9">Ngày 9</option>
+                            <option value="10">Ngày 10</option>
+                            <option value="11">Ngày 11</option>
+                            <option value="12">Ngày 12</option>
+                            <option value="13">Ngày 13</option>
+                            <option value="14">Ngày 14</option>
+                            <option value="15">Ngày 15</option>
+                            <option value="16">Ngày 16</option>
+                            <option value="17">Ngày 17</option>
+                            <option value="18">Ngày 18</option>
+                            <option value="19">Ngày 19</option>
+                            <option value="20">Ngày 20</option>
+                            <option value="21">Ngày 21</option>
+                            <option value="22">Ngày 22</option>
+                            <option value="23">Ngày 23</option>
+                            <option value="24">Ngày 24</option>
+                            <option value="25">Ngày 25</option>
+                            <option value="26">Ngày 26</option>
+                            <option value="27">Ngày 27</option>
+                            <option value="28">Ngày 28</option>
+                            <option value="29">Ngày 29</option>
+                            <option value="30">Ngày 30</option>
+                            <option value="31">Ngày 31</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="debt-installment-amount">Số tiền mỗi đợt (₫) <span class="input-optional">(Tùy chọn)</span></label>
-                        <input type="number" id="debt-installment-amount" class="form-input" placeholder="Nhập số tiền mỗi đợt..." min="0">
+                        <label for="debt-due-day">Ngày trả nợ hằng tháng <span class="input-optional">(Tùy chọn)</span></label>
+                        <select id="debt-due-day" class="form-input">
+                            <option value="">Không có</option>
+                            <option value="1">Ngày 1</option>
+                            <option value="2">Ngày 2</option>
+                            <option value="3">Ngày 3</option>
+                            <option value="4">Ngày 4</option>
+                            <option value="5">Ngày 5</option>
+                            <option value="6">Ngày 6</option>
+                            <option value="7">Ngày 7</option>
+                            <option value="8">Ngày 8</option>
+                            <option value="9">Ngày 9</option>
+                            <option value="10">Ngày 10</option>
+                            <option value="11">Ngày 11</option>
+                            <option value="12">Ngày 12</option>
+                            <option value="13">Ngày 13</option>
+                            <option value="14">Ngày 14</option>
+                            <option value="15">Ngày 15</option>
+                            <option value="16">Ngày 16</option>
+                            <option value="17">Ngày 17</option>
+                            <option value="18">Ngày 18</option>
+                            <option value="19">Ngày 19</option>
+                            <option value="20">Ngày 20</option>
+                            <option value="21">Ngày 21</option>
+                            <option value="22">Ngày 22</option>
+                            <option value="23">Ngày 23</option>
+                            <option value="24">Ngày 24</option>
+                            <option value="25">Ngày 25</option>
+                            <option value="26">Ngày 26</option>
+                            <option value="27">Ngày 27</option>
+                            <option value="28">Ngày 28</option>
+                            <option value="29">Ngày 29</option>
+                            <option value="30">Ngày 30</option>
+                            <option value="31">Ngày 31</option>
+                        </select>
                     </div>
                 </div>
                 <div class="form-group-row">

@@ -3,16 +3,20 @@
 // State của ứng dụng (được lưu trữ dưới dạng mã hóa AES trong LocalStorage)
 let appState = {
     transactions: [],  // Thu nhập & Chi tiêu: { id, type, date, amount, category, notes }
-    debts: [],         // Khoản nợ: { id, creditor, amount, type, interestRate, dueDate, status, repayments: [] }
+    debts: [],         // Khoản nợ: { id, creditor, amount, type, interestRate, dueDate, status, repayments: [], statementDay, dueDay }
     goals: [],         // Kế hoạch: { id, title, targetAmount, currentAmount, dueDate, timeframe, milestones: [] }
     tasks: [],         // Công việc: { id, title, description, status, priority, dueDate }
-    notes: [],         // Ghi chú: { id, title, content, createdAt }
+    notes: [],         // Ghi chú: { id, title, content, createdAt, reminderAt, reminderTriggered }
     storageFiles: [],  // Tài liệu lưu trữ (Metadata): { id, name, type, size, uploadedAt }
     isDirty: false,    // Cờ hiệu báo dữ liệu thay đổi chưa đồng bộ lên Sheets
+    clientRevision: "0", // Revision của dữ liệu cục bộ
     settings: {
         sheetUrl: "https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit?gid=0#gid=0",
         webAppUrl: "",
-        syncToken: "PersonalManagerHub2026"
+        syncToken: "PersonalManagerHub2026",
+        maxSpendDaily: 0,
+        maxSpendWeekly: 0,
+        maxSpendMonthly: 0
     }
 };
 
@@ -49,8 +53,78 @@ function safeCreateIcons() {
             console.warn("Lỗi dựng Lucide Icons: ", e);
         }
     } else {
-        console.warn("Thư viện Lucide Icons chưa được tải.");
+        console.warn("Thư viện Lucide Icons chưa được tải. Đang thử lại...");
+        let attempts = 0;
+        const interval = setInterval(() => {
+            attempts++;
+            if (typeof lucide !== 'undefined') {
+                try {
+                    lucide.createIcons();
+                } catch(e) {}
+                clearInterval(interval);
+            } else if (attempts >= 15) {
+                clearInterval(interval);
+            }
+        }, 300);
     }
+}
+
+// Khởi tạo hệ thống kiểm tra nhắc nhở sổ tay ghi chú
+function initReminderEngine() {
+    if (typeof Notification !== 'undefined' && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+    
+    setInterval(() => {
+        if (!derivedKey) return;
+        
+        const now = Date.now();
+        let hasTriggered = false;
+        
+        appState.notes.forEach(note => {
+            if (note.reminderAt && !note.reminderTriggered) {
+                const remindTime = new Date(note.reminderAt).getTime();
+                if (remindTime <= now) {
+                    note.reminderTriggered = true;
+                    hasTriggered = true;
+                    triggerNotification(note);
+                }
+            }
+        });
+        
+        if (hasTriggered) {
+            saveStateToLocalStorage(false);
+            renderWorkspaceNotesView();
+        }
+    }, 5000); // Quét mỗi 5 giây
+}
+
+function triggerNotification(note) {
+    if (typeof Notification !== 'undefined' && Notification.permission === "granted") {
+        try {
+            new Notification(`🔔 Nhắc nhở Hub Cá nhân`, {
+                body: `${note.title}: ${note.content.substring(0, 80)}`,
+                icon: "/icon.svg"
+            });
+        } catch (e) {
+            console.error("Lỗi gửi thông báo: ", e);
+        }
+    }
+    
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.type = "sine";
+        oscillator.frequency.value = 523.25; // C5
+        gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 0.3);
+    } catch(e) {}
+    
+    alert(`🔔 NHẮC NHỞ HẸN GIỜ!\n\nTiêu đề: ${note.title}\n\nNội dung: ${note.content}`);
 }
 
 // ==================== KHỞI ĐỘNG ỨNG DỤNG (ENTRY POINT) ====================
@@ -110,6 +184,9 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // 3.5 Khởi động hệ thống kiểm tra nhắc nhở
+    initReminderEngine();
+
     // 4. Bộ lắng nghe sự kiện Visibility & Focus để đồng bộ tự động thời gian thực khi quay lại ứng dụng
     ['visibilitychange', 'focus'].forEach(evt => {
         window.addEventListener(evt, () => {
@@ -127,8 +204,8 @@ document.addEventListener("DOMContentLoaded", () => {
             
             if (derivedKey && appState.settings && appState.settings.webAppUrl) {
                 lastFocusSyncTime = now;
-                console.log(`🔄 [Tự động Refocus] Phát hiện quay lại ứng dụng (${evt}), tiến hành kéo dữ liệu ngầm...`);
-                pullAllDataFromGoogleSheets(false);
+                console.log(`🔄 [Tự động Refocus] Phát hiện quay lại ứng dụng (${evt}), tiến hành kiểm tra revision...`);
+                checkDatabaseRevision();
             }
         });
     });
@@ -292,7 +369,15 @@ function lockApp() {
     derivedKey = "";
     appState = {
         transactions: [], debts: [], goals: [], tasks: [], notes: [], storageFiles: [],
-        settings: { sheetUrl: "https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit?gid=0#gid=0", webAppUrl: "", syncToken: "PersonalManagerHub2026" }
+        clientRevision: "0",
+        settings: {
+            sheetUrl: "https://docs.google.com/spreadsheets/d/1XriLKH8Y8q7x6aBHkKTURbVfF1FvLe0QUjGSsyj-ZxQ/edit?gid=0#gid=0",
+            webAppUrl: "",
+            syncToken: "PersonalManagerHub2026",
+            maxSpendDaily: 0,
+            maxSpendWeekly: 0,
+            maxSpendMonthly: 0
+        }
     };
     if (autoSyncInterval) {
         clearInterval(autoSyncInterval);
@@ -325,14 +410,36 @@ function startBackgroundSync() {
     if (autoSyncInterval) clearInterval(autoSyncInterval);
     autoSyncInterval = setInterval(() => {
         if (derivedKey && appState.settings && appState.settings.webAppUrl) {
-            if (!isPulling && !isPushing) {
-                console.log("🔄 [Tự động ngầm] Đang kiểm tra cập nhật mới nhất từ Google Sheets...");
-                pullAllDataFromGoogleSheets(false); // Quét ngầm cập nhật dữ liệu mới cực nhanh giữa máy tính và điện thoại
-            } else {
-                console.log("⏳ [Tự động ngầm] Bỏ qua vòng lặp do đang bận đồng bộ dữ liệu...");
+            if (!isPulling && !isPushing && !appState.isDirty) {
+                checkDatabaseRevision();
             }
         }
-    }, 15000); // Đồng bộ thời gian thực 15 giây một lần!
+    }, 5000); // Kiểm tra mỗi 5 giây để cập nhật thời gian thực cực nhanh!
+}
+
+function checkDatabaseRevision() {
+    const webAppUrl = appState.settings.webAppUrl;
+    const syncToken = appState.settings.syncToken;
+    
+    if (!webAppUrl || isPulling || isPushing || appState.isDirty) return;
+    
+    const checkUrl = `${webAppUrl}?token=${encodeURIComponent(syncToken)}&action=check_revision&_t=${Date.now()}`;
+    
+    fetch(checkUrl, { method: "GET", mode: "cors" })
+    .then(res => res.json())
+    .then(resData => {
+        if (resData.success && resData.revision) {
+            const serverRev = resData.revision;
+            const clientRev = appState.clientRevision || "0";
+            if (serverRev !== clientRev) {
+                console.log(`🔄 [Đồng bộ] Phát hiện thay đổi dữ liệu từ thiết bị khác (Revision Server: ${serverRev}, Local: ${clientRev}). Tiến hành đồng bộ tải về...`);
+                pullAllDataFromGoogleSheets(false);
+            }
+        }
+    })
+    .catch(err => {
+        console.warn("Lỗi đồng bộ ngầm khi kiểm tra revision: ", err.message);
+    });
 }
 
 // Reset bộ đếm tự động khóa
@@ -836,6 +943,29 @@ function handleSaveTransaction(e) {
     
     saveStateToLocalStorage();
     triggerAutoSync(); // Đồng bộ tự động ngầm nếu có cài đặt Sheets
+
+    // Kiểm tra xem giao dịch chi tiêu mới có vượt quá các hạn mức không
+    if (type === "expense") {
+        const { dailySpend, weeklySpend, monthlySpend } = calculateCurrentSpending();
+        const limitDaily = appState.settings.maxSpendDaily || 0;
+        const limitWeekly = appState.settings.maxSpendWeekly || 0;
+        const limitMonthly = appState.settings.maxSpendMonthly || 0;
+        
+        let warnings = [];
+        if (limitDaily > 0 && dailySpend > limitDaily) {
+            warnings.push(`Hôm nay: ${dailySpend.toLocaleString('vi-VN')} / ${limitDaily.toLocaleString('vi-VN')} ₫`);
+        }
+        if (limitWeekly > 0 && weeklySpend > limitWeekly) {
+            warnings.push(`Tuần này: ${weeklySpend.toLocaleString('vi-VN')} / ${limitWeekly.toLocaleString('vi-VN')} ₫`);
+        }
+        if (limitMonthly > 0 && monthlySpend > limitMonthly) {
+            warnings.push(`Tháng này: ${monthlySpend.toLocaleString('vi-VN')} / ${limitMonthly.toLocaleString('vi-VN')} ₫`);
+        }
+        
+        if (warnings.length > 0) {
+            alert(`⚠️ CẢNH BÁO VƯỢT HẠN MỨC CHI TIÊU!\n\nGiao dịch chi tiêu mới đã làm vượt các hạn mức sau:\n- ${warnings.join("\n- ")}`);
+        }
+    }
     
     // Reset Form & làm mới danh sách hiển thị
     document.getElementById("transaction-form").reset();
@@ -886,8 +1016,8 @@ function handleSaveDebt(e) {
     const creditor = document.getElementById("debt-creditor").value.trim();
     const type = document.getElementById("debt-type").value;
     const interestRate = parseFloat(document.getElementById("debt-interest").value) || 0;
-    const installmentsCount = parseInt(document.getElementById("debt-installments-count").value) || 0;
-    const installmentAmount = parseFloat(document.getElementById("debt-installment-amount").value) || 0;
+    const statementDay = document.getElementById("debt-statement-day").value ? parseInt(document.getElementById("debt-statement-day").value) : null;
+    const dueDay = document.getElementById("debt-due-day").value ? parseInt(document.getElementById("debt-due-day").value) : null;
     const amount = parseFloat(document.getElementById("debt-amount").value);
     const dueDate = document.getElementById("debt-due-date").value;
     const status = document.getElementById("debt-status").value;
@@ -904,8 +1034,8 @@ function handleSaveDebt(e) {
         dueDate,
         status,
         repayments,
-        installmentsCount,
-        installmentAmount
+        statementDay,
+        dueDay
     };
     
     if (id) {
@@ -1406,12 +1536,18 @@ function handleSaveNote(e) {
     const id = document.getElementById("note-id").value;
     const title = document.getElementById("note-title").value.trim();
     const content = document.getElementById("note-content").value.trim();
+    const reminderAt = document.getElementById("note-reminder-at").value;
+    
+    const oldNote = appState.notes.find(n => n.id === id);
+    const reminderTriggered = oldNote ? (oldNote.reminderAt === reminderAt ? oldNote.reminderTriggered : false) : false;
     
     const newNote = {
         id: id || "note-" + Date.now(),
         title,
         content,
-        createdAt: new Date().toLocaleDateString('vi-VN') + " " + new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})
+        createdAt: oldNote ? oldNote.createdAt : (new Date().toLocaleDateString('vi-VN') + " " + new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})),
+        reminderAt: reminderAt || "",
+        reminderTriggered: reminderTriggered
     };
     
     if (id) {
@@ -1441,6 +1577,65 @@ function handleDeleteNote(id) {
     }
 }
 
+// Hàm lấy link Google Calendar nhanh
+function getGoogleCalendarUrl(note) {
+    const title = encodeURIComponent(note.title);
+    const content = encodeURIComponent(note.content);
+    let dateStr = "";
+    if (note.reminderAt) {
+        const d = new Date(note.reminderAt);
+        const startStr = d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+        const end = new Date(d.getTime() + 30 * 60 * 1000);
+        const endStr = end.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+        dateStr = `&dates=${startStr}/${endStr}`;
+    } else {
+        const d = new Date();
+        const startStr = d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+        const endStr = new Date(d.getTime() + 30 * 60 * 1000).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+        dateStr = `&dates=${startStr}/${endStr}`;
+    }
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${content}${dateStr}`;
+}
+
+// Hàm tải xuống file Lịch .ics cho Apple/Outlook Reminders
+function downloadIcsFile(id) {
+    const note = appState.notes.find(n => n.id === id);
+    if (!note) return;
+    
+    const title = note.title;
+    const content = note.content;
+    const d = note.reminderAt ? new Date(note.reminderAt) : new Date();
+    const startStr = d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+    const end = new Date(d.getTime() + 30 * 60 * 1000);
+    const endStr = end.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+    
+    const icsContent = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Personal Hub//Notes Reminder//VI",
+        "BEGIN:VEVENT",
+        `UID:note-${note.id}-${Date.now()}@personalhub.app`,
+        `DTSTAMP:${startStr}`,
+        `DTSTART:${startStr}`,
+        `DTEND:${endStr}`,
+        `SUMMARY:${title}`,
+        `DESCRIPTION:${content.replace(/\n/g, '\\n')}`,
+        "BEGIN:VALARM",
+        "TRIGGER:-PT0M",
+        "ACTION:DISPLAY",
+        `DESCRIPTION:Nhắc nhở: ${title}`,
+        "END:VALARM",
+        "END:VEVENT",
+        "END:VCALENDAR"
+    ].join("\r\n");
+    
+    const blob = new Blob([icsContent], { type: "text/calendar;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${title.toLowerCase().replace(/[^a-z0-9]/g, "_")}_reminder.ics`;
+    link.click();
+}
+
 function handleEditNote(id) {
     const note = appState.notes.find(n => n.id === id);
     if (!note) return;
@@ -1448,6 +1643,7 @@ function handleEditNote(id) {
     document.getElementById("note-id").value = note.id;
     document.getElementById("note-title").value = note.title;
     document.getElementById("note-content").value = note.content;
+    document.getElementById("note-reminder-at").value = note.reminderAt || "";
     document.getElementById("note-form-title").textContent = "Chỉnh sửa ghi chú";
 }
 
@@ -1705,8 +1901,8 @@ function syncAllDataToGoogleSheets(alertSuccess = false) {
                     "ID": d.id, "Creditor": d.creditor, "Amount": d.amount, "Type": d.type, 
                     "InterestRate": d.interestRate, "DueDate": d.dueDate, "Status": d.status,
                     "Repayments": JSON.stringify(d.repayments),
-                    "InstallmentsCount": d.installmentsCount || 0,
-                    "InstallmentAmount": d.installmentAmount || 0
+                    "StatementDay": d.statementDay !== null && d.statementDay !== undefined ? d.statementDay : "",
+                    "DueDay": d.dueDay !== null && d.dueDay !== undefined ? d.dueDay : ""
                 };
             }),
             "Ke_Hoach": appState.goals.map(g => {
@@ -1742,6 +1938,7 @@ function syncAllDataToGoogleSheets(alertSuccess = false) {
         isPushing = false;
         if (resData.success) {
             appState.isDirty = false;
+            appState.clientRevision = resData.revision || "0";
             lastPushSuccessTime = Date.now();
             saveStateToLocalStorage(false); // Lưu trạng thái sạch sẽ
             
@@ -1830,8 +2027,8 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
                         id: d.id, creditor: d.creditor, amount: parseFloat(d.amount) || 0, type: d.type, 
                         interestRate: parseFloat(d.interestrate) || 0, dueDate: d.duedate, status: d.status,
                         repayments: reps,
-                        installmentsCount: parseInt(d.installmentscount) || 0,
-                        installmentAmount: parseFloat(d.installmentamount) || 0
+                        statementDay: d.statementday ? parseInt(d.statementday) : null,
+                        dueDay: d.dueday ? parseInt(d.dueday) : null
                     };
                 });
             }
@@ -1916,6 +2113,7 @@ function pullAllDataFromGoogleSheets(alertSuccess = true) {
             appState.tasks = pulledTasks;
             appState.notes = pulledNotes;
             appState.storageFiles = pulledFiles;
+            appState.clientRevision = resData.revision || "0";
             
             saveStateToLocalStorage(false); // Lưu trạng thái sạch sẽ sau khi kéo Sheets thành công
             renderAllViews();
@@ -2115,6 +2313,109 @@ function renderDashboardCharts() {
     });
 }
 
+// --- BỔ SUNG TIỆN ÍCH HẠN MỨC CHI TIÊU ---
+function parseLocalDate(dateStr) {
+    if (!dateStr) return new Date();
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 0, 0, 0);
+    }
+    return new Date(dateStr);
+}
+
+function calculateCurrentSpending() {
+    const now = new Date();
+    const todayStr = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
+    
+    // Ngày bắt đầu tuần này (Thứ 2)
+    const dayOfWeek = now.getDay();
+    const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+    const startOfWeek = new Date(new Date(now).setDate(diff));
+    startOfWeek.setHours(0,0,0,0);
+    
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    
+    let dailySpend = 0;
+    let weeklySpend = 0;
+    let monthlySpend = 0;
+    
+    appState.transactions.forEach(t => {
+        if (t.type !== "expense") return;
+        
+        const tDate = parseLocalDate(t.date);
+        
+        // 1. Hôm nay
+        if (t.date === todayStr) {
+            dailySpend += t.amount;
+        }
+        
+        // 2. Tuần này
+        if (tDate >= startOfWeek && tDate <= new Date()) {
+            weeklySpend += t.amount;
+        }
+        
+        // 3. Tháng này
+        if (tDate.getFullYear() === currentYear && tDate.getMonth() === currentMonth) {
+            monthlySpend += t.amount;
+        }
+    });
+    
+    return { dailySpend, weeklySpend, monthlySpend };
+}
+
+function renderSpendingLimits() {
+    const limitDaily = appState.settings.maxSpendDaily || 0;
+    const limitWeekly = appState.settings.maxSpendWeekly || 0;
+    const limitMonthly = appState.settings.maxSpendMonthly || 0;
+    
+    const { dailySpend, weeklySpend, monthlySpend } = calculateCurrentSpending();
+    
+    updateLimitProgress("daily", dailySpend, limitDaily);
+    updateLimitProgress("weekly", weeklySpend, limitWeekly);
+    updateLimitProgress("monthly", monthlySpend, limitMonthly);
+}
+
+function updateLimitProgress(type, spent, limit) {
+    const valElem = document.getElementById(`limit-val-${type}`);
+    const fillElem = document.getElementById(`limit-fill-${type}`);
+    if (!valElem || !fillElem) return;
+    
+    if (limit <= 0) {
+        valElem.textContent = `${spent.toLocaleString('vi-VN')} ₫ / Không giới hạn`;
+        fillElem.style.width = "0%";
+        fillElem.className = "limit-progress-fill";
+        return;
+    }
+    
+    const pct = Math.min(100, Math.round((spent / limit) * 100));
+    valElem.textContent = `${spent.toLocaleString('vi-VN')} ₫ / ${limit.toLocaleString('vi-VN')} ₫`;
+    fillElem.style.width = `${pct}%`;
+    
+    fillElem.className = "limit-progress-fill";
+    if (pct >= 100) {
+        fillElem.classList.add("danger-glow");
+    } else if (pct >= 70) {
+        fillElem.classList.add("warning");
+    } else {
+        fillElem.classList.add("safe");
+    }
+}
+
+function handleSaveLimits() {
+    const daily = parseFloat(document.getElementById("settings-limit-daily").value) || 0;
+    const weekly = parseFloat(document.getElementById("settings-limit-weekly").value) || 0;
+    const monthly = parseFloat(document.getElementById("settings-limit-monthly").value) || 0;
+    
+    appState.settings.maxSpendDaily = daily;
+    appState.settings.maxSpendWeekly = weekly;
+    appState.settings.maxSpendMonthly = monthly;
+    
+    saveStateToLocalStorage();
+    alert("Đã lưu cấu hình hạn mức chi tiêu thành công!");
+    renderAllViews();
+}
+
 // ==================== L. BỘ RENDER HTML ĐỘNG (DYNAMIC RENDERING VIEWS) ====================
 
 function renderAllViews() {
@@ -2126,6 +2427,7 @@ function renderAllViews() {
     renderWorkspaceNotesView();
     // Đã loại bỏ tải tệp tin theo yêu cầu người dùng
     renderStorageTips();
+    renderSpendingLimits();
 }
 
 function renderDashboardView() {
@@ -2285,12 +2587,14 @@ function renderDebtsView() {
         const progressPct = d.amount > 0 ? Math.round((totalPaid / d.amount) * 100) : 100;
         
         let installmentsHTML = "";
-        if (d.installmentsCount > 0 && d.installmentAmount > 0) {
-            const paidReps = d.repayments ? d.repayments.length : 0;
+        if (d.statementDay || d.dueDay) {
+            let stmtText = d.statementDay ? `Sao kê: Ngày ${d.statementDay}` : "";
+            let dueText = d.dueDay ? `Hạn trả: Ngày ${d.dueDay}` : "";
+            let combineText = [stmtText, dueText].filter(Boolean).join(" | ");
             installmentsHTML = `
                 <div class="debt-installments-badge" style="font-size:11px; color:var(--color-primary); background:rgba(124,58,237,0.1); padding:4px 8px; border-radius:4px; margin-top:4px; display:inline-block;">
                     <i data-lucide="calendar-days" style="width:12px; height:12px; display:inline-block; vertical-align:middle; margin-right:4px;"></i>
-                    Kế hoạch: ${paidReps}/${d.installmentsCount} đợt (mỗi đợt ${d.installmentAmount.toLocaleString('vi-VN')} ₫)
+                    ${combineText}
                 </div>
             `;
         }
@@ -2448,8 +2752,8 @@ function handleEditDebt(id) {
     document.getElementById("debt-creditor").value = debt.creditor;
     document.getElementById("debt-type").value = debt.type;
     document.getElementById("debt-interest").value = debt.interestRate;
-    document.getElementById("debt-installments-count").value = debt.installmentsCount || "";
-    document.getElementById("debt-installment-amount").value = debt.installmentAmount || "";
+    document.getElementById("debt-statement-day").value = debt.statementDay !== null && debt.statementDay !== undefined ? debt.statementDay : "";
+    document.getElementById("debt-due-day").value = debt.dueDay !== null && debt.dueDay !== undefined ? debt.dueDay : "";
     document.getElementById("debt-amount").value = debt.amount;
     document.getElementById("debt-due-date").value = debt.dueDate;
     document.getElementById("debt-status").value = debt.status;
@@ -2564,13 +2868,28 @@ function renderWorkspaceNotesView() {
     list.forEach(n => {
         const card = document.createElement("div");
         card.className = "glass-card note-card";
+        
+        let reminderHTML = "";
+        if (n.reminderAt) {
+            const timeStr = new Date(n.reminderAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+            reminderHTML = `
+                <div class="note-reminder-badge" style="font-size:11px; color:var(--color-primary); background:rgba(124,58,237,0.1); padding:4px 8px; border-radius:4px; margin-top:8px; display:inline-block;">
+                    <i data-lucide="bell" style="width:12px; height:12px; display:inline-block; vertical-align:middle; margin-right:4px;"></i>
+                    Hẹn giờ: ${timeStr} ${n.reminderTriggered ? '<span style="color:var(--text-muted);">(Đã nhắc)</span>' : ''}
+                </div>
+            `;
+        }
+        
         card.innerHTML = `
             <h3>${n.title}</h3>
             <p>${n.content.replace(/\n/g, '<br>')}</p>
+            ${reminderHTML}
             <div class="note-card-footer">
                 <span><i data-lucide="calendar" style="width:11px;height:11px;display:inline-block;vertical-align:middle;margin-right:4px;"></i> ${n.createdAt}</span>
                 <div class="debt-card-actions">
                     <button class="btn-action-small" onclick="copyNoteForNotebookLM('${n.id}')" title="Sao chép cho NotebookLM"><i data-lucide="brain-circuit"></i></button>
+                    <a class="btn-action-small" href="${getGoogleCalendarUrl(n)}" target="_blank" title="Thêm vào Google Calendar"><i data-lucide="calendar-plus"></i></a>
+                    <button class="btn-action-small" onclick="downloadIcsFile('${n.id}')" title="Tải file Lịch (.ics)"><i data-lucide="download"></i></button>
                     <button class="btn-action-small" onclick="handleEditNote('${n.id}')" title="Chỉnh sửa"><i data-lucide="edit-2"></i></button>
                     <button class="btn-action-small btn-delete" onclick="handleDeleteNote('${n.id}')" title="Xóa"><i data-lucide="trash-2"></i></button>
                 </div>
@@ -2716,46 +3035,14 @@ function initAppComponents() {
         addDebtBtn.addEventListener("click", () => {
             document.getElementById("debt-form").reset();
             document.getElementById("debt-id").value = "";
-            document.getElementById("debt-installments-count").value = "";
-            document.getElementById("debt-installment-amount").value = "";
+            document.getElementById("debt-statement-day").value = "";
+            document.getElementById("debt-due-day").value = "";
             document.getElementById("debt-modal-title").textContent = "Ghi nhận khoản nợ mới";
             openModal("modal-debt");
         });
     }
     const debtForm = document.getElementById("debt-form");
     if (debtForm) debtForm.addEventListener("submit", handleSaveDebt);
-
-    // Bộ tính toán tự động thông minh cho Khoản nợ (Smart Debt Calculations)
-    const debtInstallmentsCount = document.getElementById("debt-installments-count");
-    const debtInstallmentAmount = document.getElementById("debt-installment-amount");
-    const debtAmount = document.getElementById("debt-amount");
-
-    if (debtInstallmentsCount && debtInstallmentAmount && debtAmount) {
-        const calcDebtAmountFromInstallments = () => {
-            const count = parseInt(debtInstallmentsCount.value) || 0;
-            const instAmount = parseFloat(debtInstallmentAmount.value) || 0;
-            if (count > 0 && instAmount > 0) {
-                debtAmount.value = count * instAmount;
-            }
-        };
-
-        const calcDebtInstallmentsFromAmount = () => {
-            const amount = parseFloat(debtAmount.value) || 0;
-            const count = parseInt(debtInstallmentsCount.value) || 0;
-            const instAmount = parseFloat(debtInstallmentAmount.value) || 0;
-            if (amount > 0) {
-                if (count > 0) {
-                    debtInstallmentAmount.value = Math.round(amount / count);
-                } else if (instAmount > 0) {
-                    debtInstallmentsCount.value = Math.ceil(amount / instAmount);
-                }
-            }
-        };
-
-        debtInstallmentsCount.addEventListener("input", calcDebtAmountFromInstallments);
-        debtInstallmentAmount.addEventListener("input", calcDebtAmountFromInstallments);
-        debtAmount.addEventListener("input", calcDebtInstallmentsFromAmount);
-    }
 
     const addGoalBtn = document.getElementById("btn-add-goal-modal");
     if (addGoalBtn) {
@@ -2856,6 +3143,19 @@ function initAppComponents() {
     
     const setTokenInput = document.getElementById("settings-sync-token");
     if (setTokenInput) setTokenInput.value = appState.settings.syncToken || "PersonalManagerHub2026";
+    
+    // Nạp hạn mức chi tiêu ban đầu từ state
+    const setLimitDailyInput = document.getElementById("settings-limit-daily");
+    if (setLimitDailyInput) setLimitDailyInput.value = appState.settings.maxSpendDaily || "";
+    
+    const setLimitWeeklyInput = document.getElementById("settings-limit-weekly");
+    if (setLimitWeeklyInput) setLimitWeeklyInput.value = appState.settings.maxSpendWeekly || "";
+    
+    const setLimitMonthlyInput = document.getElementById("settings-limit-monthly");
+    if (setLimitMonthlyInput) setLimitMonthlyInput.value = appState.settings.maxSpendMonthly || "";
+
+    const saveLimitsBtn = document.getElementById("btn-save-limits");
+    if (saveLimitsBtn) saveLimitsBtn.addEventListener("click", handleSaveLimits);
     
     // Tạo block code hiển thị copy Apps Script
     renderAppsScriptCode();
@@ -3002,5 +3302,5 @@ window.copyNoteForNotebookLM = copyNoteForNotebookLM;
 window.handleEditNote = handleEditNote;
 window.handleDeleteNote = handleDeleteNote;
 window.togglePinTip = togglePinTip;
-window.handleDeleteStorageFile = handleDeleteStorageFile;
+window.downloadIcsFile = downloadIcsFile;
 
